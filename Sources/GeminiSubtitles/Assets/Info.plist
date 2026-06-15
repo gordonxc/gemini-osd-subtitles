@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Gemini Subtitles</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.gemini-subtitles</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundleExecutable</key>
+    <string>GeminiSubtitles</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.2</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Gemini Subtitles captures system audio to translate it into on-screen subtitles.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Gemini Subtitles captures system audio to translate it into on-screen subtitles.</string>
+    <key>NSSystemAudioRecordingUsageDescription</key>
+    <string>Gemini Subtitles captures system audio to translate it into on-screen subtitles.</string>
+    <key>NSScreenCaptureDescription</key>
+    <string>Gemini Subtitles uses screen capture (audio-only) to capture system audio for live translation subtitles.</string>
+</dict>
+</plist>
