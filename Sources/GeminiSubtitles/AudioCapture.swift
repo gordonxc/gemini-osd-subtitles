@@ -27,6 +27,10 @@ final class AudioCapture: NSObject, SCStreamDelegate {
     private var stream: SCStream?
     private var running = false
     private let queue = DispatchQueue(label: "GeminiSubtitles.audio", qos: .userInitiated)
+    /// Background queue for diagnostic logging — never blocks the audio thread.
+    private let diagQueue = DispatchQueue(label: "GeminiSubtitles.audio.diag", qos: .utility)
+    /// Counts IOProc invocations; used to throttle full stats computation.
+    private var diagCounter: UInt = 0
 
     // MARK: Lifecycle
 
@@ -200,17 +204,33 @@ extension AudioCapture: SCStreamOutput {
         guard frameCount > 0 else { return }
 
         mdata.withMemoryRebound(to: Float32.self, capacity: frameCount) { ptr in
-            var sumSq: Float = 0
-            var maxAbs: Float = 0
-            for j in 0..<frameCount {
-                let s = ptr[j]; sumSq += s * s
-                let a = abs(s); if a > maxAbs { maxAbs = a }
+            // Cheap silence heuristic: check first / middle / last sample.
+            // Real audio virtually never has all three at exact zero; the
+            // TCC privacy fallback (and genuinely silent output) does.
+            // This avoids a full O(N) pass on every real-time audio callback.
+            let last = frameCount - 1
+            let mid = frameCount >> 1
+            let silent = ptr[0] == 0 && ptr[mid] == 0 && ptr[last] == 0
+
+            // Every ~10 callbacks (~1/sec at 93 calls/sec), compute full
+            // RMS/maxAbs for diagnostics. Offload DebugLog writes to a
+            // utility queue so file I/O never blocks the audio thread.
+            diagCounter &+= 1
+            if diagCounter % 10 == 0 {
+                var sumSq: Float = 0
+                var maxAbs: Float = 0
+                for j in 0..<frameCount {
+                    let s = ptr[j]; sumSq += s * s
+                    let a = abs(s); if a > maxAbs { maxAbs = a }
+                }
+                let rms = sqrtf(sumSq / Float(frameCount))
+                let frames = frameCount
+                let isSilent = silent
+                diagQueue.async {
+                    DebugLog.write("AudioCapture SCK: frames=\(frames) rms=\(String(format: "%.6f", rms)) maxAbs=\(String(format: "%.6f", maxAbs)) silent=\(isSilent)")
+                }
             }
-            let rms = sqrtf(sumSq / Float(frameCount))
-            let silent = maxAbs == 0
-            if frameCount % 4800 < 512 {  // throttled ~ every 100ms
-                DebugLog.write("AudioCapture SCK: frames=\(frameCount) rms=\(String(format: "%.6f", rms)) maxAbs=\(String(format: "%.6f", maxAbs)) silent=\(silent)")
-            }
+
             onSamples?(ptr, frameCount, silent)
         }
     }
