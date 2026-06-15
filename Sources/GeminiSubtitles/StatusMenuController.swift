@@ -59,58 +59,61 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         startStopItem = startStop
         refreshStartStopTitle()
 
-        let languageHeader = NSMenuItem(title: "Target Language", action: nil, keyEquivalent: "")
-        languageHeader.isEnabled = false
-        menu.addItem(languageHeader)
-
-        let current = selectedLanguageCode()
+        // --- Target Language submenu ---
+        let currentLang = selectedLanguageCode()
+        let langName = Languages.name(forCode: currentLang)
+        let langParent = NSMenuItem(title: "Target Language: \(langName)", action: nil, keyEquivalent: "")
+        let langMenu = NSMenu()
+        languageItems = []
         for lang in Languages.all {
             let item = NSMenuItem(title: lang.name, action: #selector(selectLanguage(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = lang.code
-            item.state = (lang.code == current) ? .on : .off
-            menu.addItem(item)
+            item.state = (lang.code == currentLang) ? .on : .off
+            langMenu.addItem(item)
             languageItems.append(item)
         }
+        langParent.submenu = langMenu
+        menu.addItem(langParent)
 
-        menu.addItem(.separator())
-
-        // Audio source picker
-        let sourceHeader = NSMenuItem(title: "Audio Source", action: nil, keyEquivalent: "")
-        sourceHeader.isEnabled = false
-        menu.addItem(sourceHeader)
-
+        // --- Audio Source submenu ---
         let currentSource = selectedAudioSourceUID()
+        let sourceLabel = currentSource.isEmpty ? "System Default" : (AudioCapture.enumerateOutputDevices().first { $0.uid == currentSource }?.name ?? "Custom")
+        let sourceParent = NSMenuItem(title: "Audio Source: \(sourceLabel)", action: nil, keyEquivalent: "")
+        let sourceMenu = NSMenu()
         let systemItem = NSMenuItem(title: "System Default", action: #selector(selectAudioSource(_:)), keyEquivalent: "")
         systemItem.target = self
         systemItem.representedObject = ""   // empty = system default
         systemItem.state = currentSource.isEmpty ? .on : .off
-        menu.addItem(systemItem)
-
+        sourceMenu.addItem(systemItem)
+        if !AudioCapture.enumerateOutputDevices().isEmpty {
+            sourceMenu.addItem(.separator())
+        }
         for device in AudioCapture.enumerateOutputDevices() {
             let item = NSMenuItem(title: device.name, action: #selector(selectAudioSource(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = device.uid
             item.state = (device.uid == currentSource) ? .on : .off
-            menu.addItem(item)
+            sourceMenu.addItem(item)
         }
+        sourceParent.submenu = sourceMenu
+        menu.addItem(sourceParent)
 
-        menu.addItem(.separator())
-
-        // Font size picker
-        let fontHeader = NSMenuItem(title: "Font Size", action: nil, keyEquivalent: "")
-        fontHeader.isEnabled = false
-        menu.addItem(fontHeader)
-
+        // --- Font Size submenu ---
         let currentSize = selectedFontSize()
+        let fontParent = NSMenuItem(title: "Font Size: \(currentSize) pt", action: nil, keyEquivalent: "")
+        let fontMenu = NSMenu()
+        fontSizeItems = []
         for size in StatusMenuController.fontSizes {
             let item = NSMenuItem(title: "\(size) pt", action: #selector(selectFontSize(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = size
             item.state = (size == currentSize) ? .on : .off
-            menu.addItem(item)
+            fontMenu.addItem(item)
             fontSizeItems.append(item)
         }
+        fontParent.submenu = fontMenu
+        menu.addItem(fontParent)
 
         menu.addItem(.separator())
 
@@ -176,9 +179,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     @objc private func selectLanguage(_ sender: NSMenuItem) {
         guard let code = sender.representedObject as? String else { return }
         UserDefaults.standard.set(code, forKey: selectedLanguageKey)
-        for item in languageItems {
-            item.state = (item === sender) ? .on : .off
-        }
+        rebuildMenuInPlace()
         // If we're mid-run, swap the language live by restarting the bridge.
         if coordinator?.runState == .active
             || coordinator?.runState == .starting
@@ -191,12 +192,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     @objc private func selectAudioSource(_ sender: NSMenuItem) {
         guard let uid = sender.representedObject as? String else { return }
         UserDefaults.standard.set(uid, forKey: selectedAudioSourceKey)
-        // Rebuild the menu to refresh checkmarks.
-        if let menu = statusItem?.menu {
-            let newMenu = buildMenu()
-            statusItem?.menu = newMenu
-            _ = menu  // keep reference; Swift will deallocate after swap
-        }
+        rebuildMenuInPlace()
         // If we're mid-run, restart capture with the new source.
         if coordinator?.runState == .active
             || coordinator?.runState == .starting
@@ -210,10 +206,18 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     @objc private func selectFontSize(_ sender: NSMenuItem) {
         guard let size = sender.representedObject as? Int else { return }
         UserDefaults.standard.set(size, forKey: selectedFontSizeKey)
-        for item in fontSizeItems {
-            item.state = (item === sender) ? .on : .off
-        }
+        rebuildMenuInPlace()
         coordinator?.setSubtitleFontSize(CGFloat(size))
+    }
+
+    /// Rebuild the status item's menu so parent titles reflect the new
+    /// selection. The old menu is released after the swap.
+    private func rebuildMenuInPlace() {
+        guard let statusItem else { return }
+        let oldMenu = statusItem.menu
+        let newMenu = buildMenu()
+        statusItem.menu = newMenu
+        _ = oldMenu
     }
 
     @objc private func toggleOSDLock() {

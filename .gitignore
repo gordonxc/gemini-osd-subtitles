@@ -3,3 +3,5 @@
 *.xcodeproj/
 Package.resolved
 GeminiSubtitles.app/
+*.app.zip
+GeminiSubtitles.app.zip
