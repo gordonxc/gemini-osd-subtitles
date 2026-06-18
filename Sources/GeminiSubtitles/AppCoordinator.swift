@@ -47,6 +47,23 @@ final class AppCoordinator {
 
     private var currentTargetLanguage: String = Languages.defaultCode
 
+    /// True after `start()` until audio capture has begun. Used to gate the
+    /// one-shot `beginAudioCaptureIfRunning()` call from `handleGeminiStatus(.ready)`.
+    private var awaitingAudioStart = false
+
+    /// Coalesced transcription update: the latest text waiting to be flushed
+    /// to the OSD, plus the pending work item. Reduces main-thread hops when
+    /// Gemini bursts many small fragments.
+    private var pendingTranscription: String?
+    private var pendingTranscriptionWork: DispatchWorkItem?
+
+    /// Reusable timer that demotes `.receivingAudio` back to `.active` after
+    /// a few seconds of silence, so the icon goes blue → green when audio
+    /// stops flowing (e.g. user pauses the video).
+    private var silenceDemotionTimer: DispatchSourceTimer?
+    /// Seconds of consecutive silence before the icon demotes blue → green.
+    private let silenceDemotionSeconds: TimeInterval = 3.0
+
     // MARK: Launch
 
     /// Called on launch. Preflight Screen Recording permission; if not yet
@@ -102,8 +119,13 @@ final class AppCoordinator {
         let audioCapture = AudioCapture()
         audioCapture.deviceUID = (audioSourceUID?.isEmpty == false) ? audioSourceUID : nil
         audioCapture.onSamples = { [weak self] samples, count, silent in
+            // Skip the pipeline entirely when the batch is silent so we make
+            // no Gemini API calls during idle periods (e.g. user pauses the
+            // video). The pipeline's internal partial buffer is preserved
+            // and resumes filling once non-silent audio returns.
+            guard !silent else { return }
             self?.pipeline.process(samples: samples, count: count)
-            if !silent { self?.markAudioReceived() }
+            self?.markAudioReceived()
         }
         audioCapture.onError = { [weak self] error in
             self?.handleAudioError(error)
@@ -127,17 +149,20 @@ final class AppCoordinator {
                 self.setSubtitleFontSize(CGFloat(storedSize))
             }
             self.subtitleBuffer.onUpdate = { [weak self] text in
-                self?.handleTranscription(text: text, isFinal: false)
+                self?.scheduleTranscriptionUpdate(text)
             }
             self.subtitleWindow.reveal()
         }
 
-        // 6. Start audio capture after a brief grace period for Gemini setup.
-        // The tap creation triggers the "System Audio Recording" TCC prompt
-        // on first run — if denied, we get an error and route to the
-        // permission UI.
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.beginAudioCaptureIfRunning()
+        // 6. Start audio capture when Gemini reaches `.ready` (handled in
+        // `handleGeminiStatus`). A 5 s fallback covers the rare case where
+        // `.ready` never fires — capture still starts so we can show the
+        // blue icon and diagnose whether audio is flowing.
+        awaitingAudioStart = true
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 5.0) { [weak self] in
+            guard let self, self.awaitingAudioStart else { return }
+            DebugLog.write("AppCoordinator: ready-not-received fallback firing after 5 s")
+            self.beginAudioCaptureIfRunning()
         }
     }
 
@@ -147,6 +172,12 @@ final class AppCoordinator {
         gemini?.stop()
         gemini = nil
         pipeline.reset()
+        awaitingAudioStart = false
+        silenceDemotionTimer?.cancel()
+        silenceDemotionTimer = nil
+        pendingTranscriptionWork?.cancel()
+        pendingTranscriptionWork = nil
+        pendingTranscription = nil
         DispatchQueue.main.async { [weak self] in
             self?.subtitleBuffer.reset()
             self?.subtitleWindow.hide()
@@ -161,6 +192,38 @@ final class AppCoordinator {
         DispatchQueue.main.async { [weak self] in
             self?.subtitleWindow.update(text: text, isFinal: isFinal)
         }
+    }
+
+    /// Coalesce transcription updates before flushing to the OSD. Gemini often
+    /// bursts many small fragments in quick succession; updating the window
+    /// on each one causes redundant layout passes. We flush immediately on
+    /// the first update after a quiet period, then collapse any subsequent
+    /// updates arriving within the throttle window into a single flush.
+    private func scheduleTranscriptionUpdate(_ text: String) {
+        pendingTranscription = text
+        // If a flush is already scheduled, the latest text will be used when
+        // it fires — no need to schedule another.
+        if pendingTranscriptionWork != nil { return }
+
+        // First update in a burst: flush now so the user sees new text with
+        // minimal latency.
+        flushPendingTranscription()
+
+        // Schedule a trailing flush 100 ms later; any fragments that arrive
+        // in that window overwrite `pendingTranscription` and are flushed
+        // together instead of one-by-one.
+        let work = DispatchWorkItem { [weak self] in
+            self?.flushPendingTranscription()
+            self?.pendingTranscriptionWork = nil
+        }
+        pendingTranscriptionWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
+    }
+
+    private func flushPendingTranscription() {
+        guard let text = pendingTranscription else { return }
+        pendingTranscription = nil
+        subtitleWindow.update(text: text, isFinal: false)
     }
 
     /// Toggle the OSD between click-through (locked) and draggable (unlocked).
@@ -181,14 +244,41 @@ final class AppCoordinator {
     }
 
     /// Called from the audio thread when a non-silent batch arrives. Promotes
-    /// the run state to .receivingAudio so the menu bar icon turns blue.
+    /// the run state to .receivingAudio so the menu bar icon turns blue, and
+    /// (re)arms the silence demotion timer so the icon drops back to green
+    /// after `silenceDemotionSeconds` without audio.
     private func markAudioReceived() {
-        // Off-main thread; marshal to main for the state change.
+        // Off-main thread; marshal to main for the state change + timer work.
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.runState == .active else { return }
-            self.runState = .receivingAudio
-            self.lastStatusText = "Listening · \(Languages.name(forCode: self.currentTargetLanguage))"
+            guard let self else { return }
+            if self.runState == .active {
+                self.runState = .receivingAudio
+            }
+            if self.runState == .receivingAudio {
+                self.lastStatusText = "Listening · \(Languages.name(forCode: self.currentTargetLanguage))"
+                self.armSilenceDemotionTimer()
+            }
         }
+    }
+
+    /// (Re)start the 3 s timer. On fire, demote `.receivingAudio → .active`
+    /// so the icon goes blue → green when audio stops flowing (e.g. user
+    /// pauses the video).
+    private func armSilenceDemotionTimer() {
+        silenceDemotionTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + silenceDemotionSeconds)
+        timer.setEventHandler { [weak self] in
+            guard let self, self.runState == .receivingAudio else { return }
+            self.runState = .active
+            self.lastStatusText = "Running · \(Languages.name(forCode: self.currentTargetLanguage))"
+            // Audio has gone silent — clear and hide the OSD so the last line
+            // doesn't linger on screen.
+            self.subtitleBuffer.reset()
+            self.subtitleWindow.hide()
+        }
+        timer.resume()
+        silenceDemotionTimer = timer
     }
 
     private func handleGeminiStatus(_ status: GeminiClient.Status) {
@@ -196,6 +286,13 @@ final class AppCoordinator {
         case .ready:
             runState = .active
             lastStatusText = "Running · \(Languages.name(forCode: currentTargetLanguage))"
+            // Kick off audio capture now that the WebSocket is set up. The
+            // 5 s fallback in start() covers the rare case where .ready
+            // never fires.
+            if awaitingAudioStart {
+                awaitingAudioStart = false
+                beginAudioCaptureIfRunning()
+            }
         case .connecting:
             if runState != .starting {
                 runState = .starting
