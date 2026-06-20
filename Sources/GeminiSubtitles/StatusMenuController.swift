@@ -28,9 +28,16 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     /// User-defaults key for the OSD font size (points).
     private let selectedFontSizeKey = "com.gemini-subtitles.fontSize"
 
+    /// User-defaults key for the auto-stop inactivity timeout (minutes,
+    /// 0 = off).
+    private let selectedAutoStopKey = "com.gemini-subtitles.autoStopMinutes"
+
     /// Available OSD font sizes (points). Default is 20.
     static let fontSizes: [Int] = [14, 18, 20, 24, 28, 32, 40, 48, 56, 64, 72]
     static let defaultFontSize: Int = 20
+
+    /// Available auto-stop inactivity timeouts in minutes (0 = off).
+    static let autoStopOptions: [Int] = [0, 5, 15, 30, 60]
 
     init(coordinator: AppCoordinator, statusItem: NSStatusItem) {
         self.coordinator = coordinator
@@ -114,6 +121,22 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         }
         fontParent.submenu = fontMenu
         menu.addItem(fontParent)
+
+        // --- Auto-stop submenu ---
+        let currentAutoStop = selectedAutoStopMinutes()
+        let autoStopLabel = currentAutoStop == 0 ? "Off" : "\(currentAutoStop) min"
+        let autoStopParent = NSMenuItem(title: "Auto-stop: \(autoStopLabel)", action: nil, keyEquivalent: "")
+        let autoStopMenu = NSMenu()
+        for option in StatusMenuController.autoStopOptions {
+            let title = option == 0 ? "Off" : "\(option) min"
+            let item = NSMenuItem(title: title, action: #selector(selectAutoStop(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = option
+            item.state = (option == currentAutoStop) ? .on : .off
+            autoStopMenu.addItem(item)
+        }
+        autoStopParent.submenu = autoStopMenu
+        menu.addItem(autoStopParent)
 
         menu.addItem(.separator())
 
@@ -210,6 +233,14 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         coordinator?.setSubtitleFontSize(CGFloat(size))
     }
 
+    @objc private func selectAutoStop(_ sender: NSMenuItem) {
+        guard let minutes = sender.representedObject as? Int else { return }
+        UserDefaults.standard.set(minutes, forKey: selectedAutoStopKey)
+        rebuildMenuInPlace()
+        // AppCoordinator reads the new value on its next poll tick — no
+        // need to push it explicitly.
+    }
+
     /// Rebuild the status item's menu so parent titles reflect the new
     /// selection. The old menu is released after the swap.
     private func rebuildMenuInPlace() {
@@ -279,6 +310,14 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         guard stored > 0, Self.fontSizes.contains(stored) else {
             return Self.defaultFontSize
         }
+        return stored
+    }
+
+    /// Returns the stored auto-stop inactivity timeout in minutes
+    /// (0 = off, which is also the default).
+    func selectedAutoStopMinutes() -> Int {
+        let stored = UserDefaults.standard.integer(forKey: selectedAutoStopKey)
+        guard Self.autoStopOptions.contains(stored) else { return 0 }
         return stored
     }
 

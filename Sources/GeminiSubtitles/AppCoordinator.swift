@@ -64,6 +64,17 @@ final class AppCoordinator {
     /// Seconds of consecutive silence before the icon demotes blue → green.
     private let silenceDemotionSeconds: TimeInterval = 3.0
 
+    /// User-defaults key for the auto-stop inactivity timeout in minutes
+    /// (0 = off). Read on every poll tick so the menu can change it live.
+    private let autoStopUDKey = "com.gemini-subtitles.autoStopMinutes"
+    /// Polling interval for the auto-stop check. Coarse is fine because the
+    /// timeout itself is minute-scale.
+    private let autoStopPollSeconds: TimeInterval = 15.0
+    private var autoStopPollTimer: DispatchSourceTimer?
+    /// Timestamp of the last non-silent audio batch. Reset on every
+    /// `markAudioReceived`; the poll timer measures inactivity against this.
+    private var lastAudioActivityAt: Date?
+
     // MARK: Launch
 
     /// Called on launch. Preflight Screen Recording permission; if not yet
@@ -164,6 +175,11 @@ final class AppCoordinator {
             DebugLog.write("AppCoordinator: ready-not-received fallback firing after 5 s")
             self.beginAudioCaptureIfRunning()
         }
+
+        // 7. Arm the auto-stop inactivity timer. Counts from session start;
+        // every non-silent audio batch bumps `lastAudioActivityAt`.
+        lastAudioActivityAt = Date()
+        startAutoStopPollTimer()
     }
 
     func stop(reason: StopReason) {
@@ -178,6 +194,9 @@ final class AppCoordinator {
         pendingTranscriptionWork?.cancel()
         pendingTranscriptionWork = nil
         pendingTranscription = nil
+        autoStopPollTimer?.cancel()
+        autoStopPollTimer = nil
+        lastAudioActivityAt = nil
         DispatchQueue.main.async { [weak self] in
             self?.subtitleBuffer.reset()
             self?.subtitleWindow.hide()
@@ -251,6 +270,8 @@ final class AppCoordinator {
         // Off-main thread; marshal to main for the state change + timer work.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            // Bump the inactivity timestamp for the auto-stop poll timer.
+            self.lastAudioActivityAt = Date()
             if self.runState == .active {
                 self.runState = .receivingAudio
             }
@@ -279,6 +300,36 @@ final class AppCoordinator {
         }
         timer.resume()
         silenceDemotionTimer = timer
+    }
+
+    // MARK: Auto-stop
+
+    /// Start the periodic inactivity checker. The handler reads the timeout
+    /// from UserDefaults on every tick so menu changes take effect live.
+    private func startAutoStopPollTimer() {
+        autoStopPollTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + autoStopPollSeconds, repeating: autoStopPollSeconds)
+        timer.setEventHandler { [weak self] in
+            self?.checkAutoStop()
+        }
+        timer.resume()
+        autoStopPollTimer = timer
+    }
+
+    private func checkAutoStop() {
+        let minutes = UserDefaults.standard.double(forKey: autoStopUDKey)
+        guard minutes > 0, let last = lastAudioActivityAt else { return }
+        let elapsed = Date().timeIntervalSince(last)
+        let threshold = minutes * 60.0
+        guard elapsed >= threshold else { return }
+        let minsInt = Int(minutes)
+        DebugLog.write("AppCoordinator: auto-stop firing after \(Int(elapsed)) s inactivity (threshold \(minsInt) min)")
+        NotificationManager.shared.notify(
+            title: "Gemini Subtitles auto-stopped",
+            body: "No audio detected for \(minsInt) minute\(minsInt == 1 ? "" : "s"). Click Start to resume."
+        )
+        stop(reason: .userRequested)
     }
 
     private func handleGeminiStatus(_ status: GeminiClient.Status) {
