@@ -1,10 +1,11 @@
 package com.gordonxc.geminisubtitles
 
 import io.ktor.client.HttpClient
-import io.ktor.client.plugins.websockets.WebSockets
-import io.ktor.client.plugins.websockets.webSocket
-import io.ktor.websocket.DefaultClientWebSocketSession
+import io.ktor.client.plugins.websocket.WebSockets
+import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.websocket.Frame
+import io.ktor.websocket.readText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -114,6 +115,7 @@ class GeminiClient(
             try {
                 httpClient.webSocket(urlString = url) {
                     currentSession = this
+                    val session = this
 
                     // Send setup message
                     val setupPayload = GeminiProtocol.encodeJson(
@@ -129,7 +131,7 @@ class GeminiClient(
                         if (running && !setupComplete) {
                             DebugLog.write("GeminiClient.setupWatchdog FIRED")
                             onError?.invoke(GeminiError.SetupTimeout)
-                            close(Frame.Close())
+                            session.cancel()
                         }
                     }
 

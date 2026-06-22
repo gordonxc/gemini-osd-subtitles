@@ -5,7 +5,7 @@ import com.gordonxc.geminisubtitles.platform.PlatformAudioCapture
 import com.gordonxc.geminisubtitles.platform.PlatformNotifier
 import com.gordonxc.geminisubtitles.platform.PlatformOverlay
 import io.ktor.client.HttpClient
-import io.ktor.client.plugins.websockets.WebSockets
+import io.ktor.client.plugins.websocket.WebSockets
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

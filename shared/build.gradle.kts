@@ -5,10 +5,12 @@ plugins {
 }
 
 kotlin {
-    androidLibrary {
-        namespace = "com.gordonxc.geminisubtitles.shared"
-        compileSdk = 35
-        minSdk = 29
+    androidTarget {
+        compilations.all {
+            kotlinOptions {
+                jvmTarget = "17"
+            }
+        }
     }
 
     sourceSets {
@@ -26,6 +28,13 @@ kotlin {
 }
 
 android {
+    namespace = "com.gordonxc.geminisubtitles.shared"
+    compileSdk = 35
+
+    defaultConfig {
+        minSdk = 29
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

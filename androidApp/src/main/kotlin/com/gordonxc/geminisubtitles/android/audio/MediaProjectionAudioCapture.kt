@@ -1,6 +1,7 @@
 package com.gordonxc.geminisubtitles.android.audio
 
 import android.annotation.SuppressLint
+import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
@@ -46,9 +47,9 @@ class MediaProjectionAudioCapture(
             val config = AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
                 .apply {
                     // Capture audio from all apps and system
-                    addMatchingUsage(AudioPlaybackCaptureConfiguration.USAGE_MEDIA)
-                    addMatchingUsage(AudioPlaybackCaptureConfiguration.USAGE_GAME)
-                    addMatchingUsage(AudioPlaybackCaptureConfiguration.USAGE_UNKNOWN)
+                    addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                    addMatchingUsage(AudioAttributes.USAGE_GAME)
+                    addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
                 }
                 .build()
 
