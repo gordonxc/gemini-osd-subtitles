@@ -27,6 +27,8 @@ fun SettingsScreen(
     onLanguageChange: (String) -> Unit,
     selectedFontSize: Float,
     onFontSizeChange: (Float) -> Unit,
+    captureFromMic: Boolean,
+    onToggleSource: () -> Unit,
     isRunning: Boolean,
     onStart: () -> Unit,
     onStop: () -> Unit,
@@ -97,6 +99,32 @@ fun SettingsScreen(
             valueRange = 14f..72f,
             steps = 0,  // continuous
         )
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+        // Audio source toggle: system audio vs microphone
+        Text("Audio Source", style = MaterialTheme.typography.titleSmall)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(if (captureFromMic) "Microphone" else "System Audio")
+                Text(
+                    if (captureFromMic)
+                        "Captures in-person speech via the device mic."
+                    else
+                        "Captures playback via MediaProjection (any app).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = captureFromMic,
+                onCheckedChange = { onToggleSource() },
+            )
+        }
 
         // Overlay lock toggle
         if (isRunning) {

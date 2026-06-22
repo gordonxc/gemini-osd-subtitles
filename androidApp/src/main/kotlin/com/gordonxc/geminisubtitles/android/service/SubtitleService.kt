@@ -15,6 +15,7 @@ import com.gordonxc.geminisubtitles.AppCoordinator
 import com.gordonxc.geminisubtitles.Languages
 import com.gordonxc.geminisubtitles.android.MainActivity
 import com.gordonxc.geminisubtitles.android.audio.MediaProjectionAudioCapture
+import com.gordonxc.geminisubtitles.android.audio.MicrophoneAudioCapture
 import com.gordonxc.geminisubtitles.android.overlay.SubtitleOverlayView
 import com.gordonxc.geminisubtitles.android.storage.EncryptedApiKeyStore
 import com.gordonxc.geminisubtitles.platform.PlatformNotifier
@@ -44,6 +45,12 @@ class SubtitleService : Service(), PlatformNotifier {
         const val EXTRA_RESULT_DATA = "result_data"
         const val EXTRA_TARGET_LANGUAGE = "target_language"
         const val EXTRA_FONT_SIZE = "font_size"
+        /// `"system"` or `"mic"`. Defaults to `"system"` if absent.
+        const val EXTRA_SOURCE = "audio_source"
+
+        /// Allowed values for EXTRA_SOURCE.
+        const val SOURCE_SYSTEM = "system"
+        const val SOURCE_MIC = "mic"
 
         private const val CHANNEL_ID = "subtitle_service"
         private const val NOTIFICATION_ID = 1
@@ -65,15 +72,21 @@ class SubtitleService : Service(), PlatformNotifier {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
-                val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
-                @Suppress("DEPRECATION")
-                val resultData: Intent? = intent.getParcelableExtra(EXTRA_RESULT_DATA)
+                val source = intent.getStringExtra(EXTRA_SOURCE) ?: SOURCE_SYSTEM
                 val targetLanguage = intent.getStringExtra(EXTRA_TARGET_LANGUAGE) ?: Languages.defaultCode
                 val fontSize = intent.getFloatExtra(EXTRA_FONT_SIZE, 20f)
 
-                if (resultData != null) {
-                    startForegroundCompat()
-                    startPipeline(resultCode, resultData, targetLanguage, fontSize)
+                if (source == SOURCE_MIC) {
+                    startForegroundCompat(source)
+                    startPipelineMic(targetLanguage, fontSize)
+                } else {
+                    val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
+                    @Suppress("DEPRECATION")
+                    val resultData: Intent? = intent.getParcelableExtra(EXTRA_RESULT_DATA)
+                    if (resultData != null) {
+                        startForegroundCompat(source)
+                        startPipelineSystem(resultCode, resultData, targetLanguage, fontSize)
+                    }
                 }
             }
             ACTION_STOP -> {
@@ -85,11 +98,24 @@ class SubtitleService : Service(), PlatformNotifier {
         return START_NOT_STICKY
     }
 
-    private fun startPipeline(resultCode: Int, resultData: Intent, targetLanguage: String, fontSize: Float) {
+    private fun startPipelineSystem(resultCode: Int, resultData: Intent, targetLanguage: String, fontSize: Float) {
         val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         val mediaProjection = projectionManager.getMediaProjection(resultCode, resultData)
 
         val audioCapture = MediaProjectionAudioCapture(mediaProjection)
+        startPipelineCommon(audioCapture, targetLanguage, fontSize)
+    }
+
+    private fun startPipelineMic(targetLanguage: String, fontSize: Float) {
+        val audioCapture = MicrophoneAudioCapture()
+        startPipelineCommon(audioCapture, targetLanguage, fontSize)
+    }
+
+    private fun startPipelineCommon(
+        audioCapture: com.gordonxc.geminisubtitles.platform.PlatformAudioCapture,
+        targetLanguage: String,
+        fontSize: Float,
+    ) {
         overlay = SubtitleOverlayView(this)
         val apiKeyStore = EncryptedApiKeyStore(this)
 
@@ -147,7 +173,7 @@ class SubtitleService : Service(), PlatformNotifier {
 
     // MARK: Foreground notification
 
-    private fun startForegroundCompat() {
+    private fun startForegroundCompat(source: String) {
         createNotificationChannel()
 
         val pendingIntent = PendingIntent.getActivity(
@@ -162,17 +188,25 @@ class SubtitleService : Service(), PlatformNotifier {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val isMic = source == SOURCE_MIC
+        val smallIcon = if (isMic) android.R.drawable.ic_btn_speak_now
+                        else android.R.drawable.ic_lock_silent_mode_off
+        val contentText = if (isMic) "Running — capturing microphone"
+                          else "Running — capturing system audio"
+
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setSmallIcon(smallIcon)
             .setContentTitle("Gemini Subtitles")
-            .setContentText("Running — capturing audio")
+            .setContentText(contentText)
             .setContentIntent(pendingIntent)
             .addAction(android.R.drawable.ic_media_pause, "Stop", stopIntent)
             .setOngoing(true)
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            val type = if (isMic) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                       else ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            startForeground(NOTIFICATION_ID, notification, type)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }

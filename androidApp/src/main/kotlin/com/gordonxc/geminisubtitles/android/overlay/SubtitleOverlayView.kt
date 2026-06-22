@@ -49,13 +49,15 @@ class SubtitleOverlayView(
         handler.post {
             if (isShowing) return@post
             val view = TextView(context).apply {
-                setText("") 
+                setText("")
                 setTextColor(Color.WHITE)
                 setBackgroundColor(0xAA000000.toInt())
                 setPadding(24, 12, 24, 12)
                 typeface = Typeface.SANS_SERIF
                 gravity = Gravity.CENTER
                 alpha = 1f
+                // Apply the font size that was set before the view existed.
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSize)
                 // Add shadow for readability
                 setShadowLayer(4f, 1f, 1f, Color.BLACK)
             }

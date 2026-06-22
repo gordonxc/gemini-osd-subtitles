@@ -8,9 +8,10 @@
     <!-- Audio capture -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- Foreground service for MediaProjection audio capture -->
+    <!-- Foreground service for audio capture (system or mic) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <!-- System overlay for OSD -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -38,7 +39,7 @@
         <service
             android:name="com.gordonxc.geminisubtitles.android.service.SubtitleService"
             android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
+            android:foregroundServiceType="mediaProjection|microphone" />
 
     </application>
 
