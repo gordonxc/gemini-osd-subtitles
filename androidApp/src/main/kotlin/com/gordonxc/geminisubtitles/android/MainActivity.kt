@@ -12,6 +12,10 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.core.content.ContextCompat
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -73,7 +77,24 @@ class MainActivity : ComponentActivity() {
         // Observe service state
         val isRunning by SubtitleService.isRunning.collectAsState()
         val statusText by SubtitleService.statusText.collectAsState()
+        val runState by SubtitleService.runState.collectAsState()
+        var hasOverlayPermission by remember {
+            mutableStateOf(Settings.canDrawOverlays(this@MainActivity))
+        }
         var overlayLocked by remember { mutableStateOf(true) }
+
+        // Refresh overlay-permission flag every time we return to the foreground
+        // (user may have just toggled it in system settings).
+        val lifecycleOwner = LocalLifecycleOwner.current
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    hasOverlayPermission = Settings.canDrawOverlays(this@MainActivity)
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
 
         // Observe overlay lock changes
         LaunchedEffect(Unit) {
@@ -98,6 +119,8 @@ class MainActivity : ComponentActivity() {
                 SubtitleService.coordinator?.setSubtitleFontSize(it)
             },
             isRunning = isRunning,
+            runState = runState,
+            hasOverlayPermission = hasOverlayPermission,
             onStart = { handleStart() },
             onStop = { handleStop() },
             captureFromMic = captureFromMic,

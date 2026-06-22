@@ -59,6 +59,7 @@ class SubtitleService : Service(), PlatformNotifier {
         val isRunning = MutableStateFlow(false)
         val statusText = MutableStateFlow("Stopped")
         val overlayLocked = MutableStateFlow(true)
+        val runState = MutableStateFlow(AppCoordinator.RunState.STOPPED)
 
         var coordinator: AppCoordinator? = null
             private set
@@ -132,6 +133,7 @@ class SubtitleService : Service(), PlatformNotifier {
         // Observe coordinator state and push to companion object StateFlows
         serviceScope.launch {
             coord.state.collectLatest { state ->
+                runState.value = state
                 isRunning.value = state != AppCoordinator.RunState.STOPPED &&
                         state != AppCoordinator.RunState.ERROR
             }
@@ -151,6 +153,7 @@ class SubtitleService : Service(), PlatformNotifier {
         isRunning.value = false
         statusText.value = "Stopped"
         overlayLocked.value = true
+        runState.value = AppCoordinator.RunState.STOPPED
         serviceScope.cancel()
         // Recreate scope so a subsequent start() can launch coroutines again
         serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
