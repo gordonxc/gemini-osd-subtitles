@@ -25,3 +25,11 @@ local.properties
 # Per-module Gradle build outputs
 **/build/
 
+# Kotlin 2.x compiler caches & daemon artifacts
+.kotlin/
+*.hprof
+
+# KMP / Xcode interop scratch
+*.xcworkspace/
+DerivedData/
+

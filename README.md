@@ -10,7 +10,7 @@ Two native ports share this repo:
 | Platform | Path        | Status |
 |----------|-------------|--------|
 | macOS    | `Sources/` (Swift) | Shipping — adhoc-signed release builds |
-| Android  | `shared/` + `androidApp/` (Kotlin Multiplatform) | Initial port |
+| Android  | `shared/` + `androidApp/` (Kotlin Multiplatform) | Working debug builds |
 
 ---
 
@@ -190,19 +190,37 @@ implementations in `shared/androidMain` and `androidApp`.
 
 - Android 10+ (API 29)
 - A Gemini API key with access to `gemini-3.5-live-translate-preview`
+- JDK 17 (Gradle 8.11.1 + AGP 8.7.3 + Kotlin 2.1.0)
 
 ### Build
 
+The repo doesn't include a `gradlew` wrapper, so use a local Gradle 8.11.1
+(AGP 8.7.3 is incompatible with newer Gradle):
+
 ```sh
-./gradlew assembleDebug
+# Point Gradle at your Android SDK install
+echo "sdk.dir=$HOME/Library/Android/sdk" > local.properties
+
+# Build the debug APK
+gradle assembleDebug        # if you have gradle 8.11.1 on PATH, or:
+/path/to/gradle-8.11.1/bin/gradle assembleDebug
+```
+
+The APK is emitted at `androidApp/build/outputs/apk/debug/androidApp-debug.apk`.
+
+Install on a connected device:
+
+```sh
+adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk
 ```
 
 ### Permissions
 
 | Permission | Why |
 |------------|-----|
+| `INTERNET` + `ACCESS_NETWORK_STATE` | Reach the Gemini WebSocket endpoint |
 | `RECORD_AUDIO` | Audio capture via MediaProjection |
-| `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_MEDIA_PLAYBACK` | Background audio capture |
+| `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_MEDIA_PROJECTION` | Background audio capture |
 | `SYSTEM_ALERT_WINDOW` | Floating subtitle overlay |
 | `POST_NOTIFICATIONS` | Error notifications (Android 13+) |
 
@@ -248,6 +266,39 @@ MediaProjection ──Float32 PCM──▶ AudioPipeline ──base64 Int16 PCM�
 | Running · {Language} | Active — streaming audio to Gemini |
 | Listening · {Language} | Non-zero audio frames observed |
 | Error | Something went wrong (check notification) |
+
+### Debugging (Android)
+
+Diagnostic logs go through `android.util.Log.d` under tag `GeminiSubtitles`.
+Capture them with:
+
+```sh
+adb logcat -s GeminiSubtitles:D
+# Crash traces:
+adb logcat -b crash
+```
+
+Key signals to grep for:
+
+* `GeminiClient.webSocket connected` — TCP/TLS handshake done.
+* `GeminiClient received frame #N: Binary` — Gemini typically sends JSON as
+  Binary frames; the client decodes both Binary and Text.
+* `GeminiClient setupComplete received ✓` — handshake succeeded; ready for
+  audio.
+* `AppCoordinator.beginAudioCaptureIfRunning: starting capture` — capture
+  kicked off after a 500 ms grace period.
+* `AudioPipeline emit chunk #N` — audio chunks being sent to Gemini.
+
+### Known gotchas
+
+* **Ktor 3.x package rename:** WebSocket APIs moved from
+  `io.ktor.client.plugins.websockets` (plural) in 2.x to
+  `io.ktor.client.plugins.websocket` (singular) in 3.x. Both this code and
+  the imports reflect 3.x.
+* **Binary frames:** Gemini's bidi endpoint acks `setup` with a Binary
+  (not Text) frame. The receive loop decodes both as UTF-8 JSON.
+* **No gradle wrapper:** the merge brought `gradle-wrapper.properties` only,
+  no `gradlew` / `gradlew.bat`. Use a local Gradle 8.11.1 install.
 
 ---
 
