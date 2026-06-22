@@ -1,3 +1,4 @@
+# Swift / macOS app
 .build/
 .swiftpm/
 *.xcodeproj/
@@ -5,3 +6,18 @@ Package.resolved
 GeminiSubtitles.app/
 *.app.zip
 GeminiSubtitles.app.zip
+
+# Kotlin / Android / Gradle
+*.iml
+.gradle
+/local.properties
+local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+*.apk
+*.aab
+*.keystore
