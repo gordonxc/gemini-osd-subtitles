@@ -21,3 +21,7 @@ local.properties
 *.apk
 *.aab
 *.keystore
+
+# Per-module Gradle build outputs
+**/build/
+

@@ -116,6 +116,7 @@ class GeminiClient(
                 httpClient.webSocket(urlString = url) {
                     currentSession = this
                     val session = this
+                    DebugLog.write("GeminiClient.webSocket connected")
 
                     // Send setup message
                     val setupPayload = GeminiProtocol.encodeJson(
@@ -136,21 +137,37 @@ class GeminiClient(
                     }
 
                     // Receive loop
+                    DebugLog.write("GeminiClient receive loop starting")
+                    var frameCount = 0
                     for (frame in incoming) {
+                        frameCount++
                         if (!running) break
-                        if (frame !is Frame.Text) continue
-                        handleIncoming(frame.readText())
+                        // Gemini may send JSON as either Text or Binary frames;
+                        // decode both as UTF-8. Non-text/binary frames (Ping,
+                        // Pong, Close) are ignored.
+                        val text = when (frame) {
+                            is Frame.Text -> frame.readText()
+                            is Frame.Binary -> frame.data.decodeToString()
+                            else -> continue
+                        }
+                        if (frameCount <= 3) {
+                            DebugLog.write("GeminiClient received frame #$frameCount: ${frame::class.simpleName} len=${text.length}")
+                        }
+                        handleIncoming(text)
                     }
+                    val reason = runCatching { closeReason.await() }.getOrNull()
+                    DebugLog.write("GeminiClient receive loop EXITED after $frameCount frames; running=$running; closeCode=${reason?.code} closeMsg=${reason?.message}")
 
                     watchdog.cancel()
                     currentSession = null
                 }
                 // WebSocket closed normally
+                DebugLog.write("GeminiClient.webSocket block exited cleanly; running=$running")
                 if (running) scheduleReconnectIfNeeded()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                DebugLog.write("GeminiClient.openConnection FAILED: ${e.message}")
+                DebugLog.write("GeminiClient.openConnection FAILED: ${e::class.simpleName}: ${e.message}")
                 currentSession = null
                 if (isAuthError(e)) {
                     // Don't retry — API key is invalid
