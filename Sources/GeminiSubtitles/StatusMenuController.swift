@@ -18,6 +18,11 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     private var fontSizeItems: [NSMenuItem] = []
     private let menu = NSMenu()
 
+    /// Open viewer windows, keyed by session URL path (or "current"). Each
+    /// session can be opened in its own window; the dictionary keeps them
+    /// alive so they don't close when the user clicks away.
+    private var viewerWindows: [String: HistoryViewerWindow] = [:]
+
     /// User-defaults key for the last chosen target language code.
     private let selectedLanguageKey = "com.gemini-subtitles.selectedLanguage"
 
@@ -140,6 +145,9 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        // --- History submenu ---
+        buildHistorySubmenu()
+
         // OSD lock/unlock toggle. Unlocked = draggable; Locked = click-through.
         let osdLock = NSMenuItem(title: "Unlock OSD to Move", action: #selector(toggleOSDLock), keyEquivalent: "")
         osdLock.target = self
@@ -261,6 +269,105 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     @objc private func quit() {
         coordinator?.stop(reason: .userRequested)
         NSApp.terminate(nil)
+    }
+
+    // MARK: History submenu
+
+    /// Builds the History ▸ submenu fresh each time the menu opens, listing
+    /// the current session (if any) plus the 10 most recent closed sessions.
+    private func buildHistorySubmenu() {
+        let parent = NSMenuItem(title: "History", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+
+        let history = coordinator?.history ?? HistoryStore()
+
+        // Current session (always present; disabled when stopped).
+        let current = NSMenuItem(
+            title: "Current Session",
+            action: #selector(openCurrentSession),
+            keyEquivalent: "")
+        current.target = self
+        let isRunning = coordinator?.runState == .active
+            || coordinator?.runState == .starting
+            || coordinator?.runState == .receivingAudio
+        current.isEnabled = isRunning
+        submenu.addItem(current)
+
+        let recents = history.listRecentSessions(limit: 10)
+        if !recents.isEmpty {
+            submenu.addItem(.separator())
+            for info in recents {
+                let item = NSMenuItem(
+                    title: HistoryStore.menuLabel(for: info),
+                    action: #selector(openPastSession(_:)),
+                    keyEquivalent: "")
+                item.target = self
+                item.representedObject = info.url.path
+                submenu.addItem(item)
+            }
+        }
+
+        submenu.addItem(.separator())
+        let reveal = NSMenuItem(
+            title: "Show All in Finder…",
+            action: #selector(revealHistoryInFinder),
+            keyEquivalent: "")
+        reveal.target = self
+        submenu.addItem(reveal)
+
+        let clear = NSMenuItem(
+            title: "Clear All History…",
+            action: #selector(clearAllHistory),
+            keyEquivalent: "")
+        clear.target = self
+        submenu.addItem(clear)
+
+        parent.submenu = submenu
+        menu.addItem(parent)
+    }
+
+    @objc private func openCurrentSession() {
+        let key = "current"
+        if let existing = viewerWindows[key] {
+            existing.makeKeyAndOrderFront(nil)
+            return
+        }
+        let history = coordinator?.history ?? HistoryStore()
+        let window = HistoryViewerWindow(store: history, info: nil)
+        window.makeKeyAndOrderFront(nil)
+        viewerWindows[key] = window
+    }
+
+    @objc private func openPastSession(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        let url = URL(fileURLWithPath: path)
+        if let existing = viewerWindows[path] {
+            existing.makeKeyAndOrderFront(nil)
+            return
+        }
+        let history = coordinator?.history ?? HistoryStore()
+        let info: SessionInfo? = history.listRecentSessions(limit: 200)
+            .first(where: { $0.url == url })
+        let window = HistoryViewerWindow(store: history, info: info)
+        window.makeKeyAndOrderFront(nil)
+        viewerWindows[path] = window
+    }
+
+    @objc private func revealHistoryInFinder() {
+        NSWorkspace.shared.activateFileViewerSelecting([HistoryStore.directory])
+    }
+
+    @objc private func clearAllHistory() {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Clear all history?"
+        alert.informativeText =
+            "All saved session files will be deleted. This cannot be undone."
+        alert.addButton(withTitle: "Clear")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        coordinator?.history.clearAll()
+        rebuildMenuInPlace()
     }
 
     // MARK: API key prompt

@@ -45,6 +45,11 @@ final class AppCoordinator {
     private let subtitleBuffer = SubtitleBuffer()
     private var lastStatusText = "Stopped"
 
+    /// Per-session subtitle history. `beginSession` is called in `start()`,
+    /// `append` is wired into `scheduleTranscriptionUpdate`, and
+    /// `endSession` is called in `stop()`.
+    let history = HistoryStore()
+
     private var currentTargetLanguage: String = Languages.defaultCode
 
     /// True after `start()` until audio capture has begun. Used to gate the
@@ -111,6 +116,10 @@ final class AppCoordinator {
 
         runState = .starting
         lastStatusText = "Connecting to Gemini…"
+
+        // Start a fresh history session file so the very first line lands
+        // in the right place.
+        history.beginSession(languageCode: targetLanguage)
 
         // 2. Build Gemini client.
         DebugLog.write("AppCoordinator.start got API key (length=\(apiKey.count), prefix=\(apiKey.prefix(8)), suffix=\(apiKey.suffix(4)))")
@@ -201,6 +210,9 @@ final class AppCoordinator {
             self?.subtitleBuffer.reset()
             self?.subtitleWindow.hide()
         }
+        // Close the history session file before potentially starting a new
+        // one (e.g. on language change).
+        history.endSession()
         runState = .stopped
         lastStatusText = reason == .languageChanged ? "Switching language…" : "Stopped"
     }
@@ -243,6 +255,8 @@ final class AppCoordinator {
         guard let text = pendingTranscription else { return }
         pendingTranscription = nil
         subtitleWindow.update(text: text, isFinal: false)
+        // Persist the finalised line to the history session file.
+        history.append(text: text)
     }
 
     /// Toggle the OSD between click-through (locked) and draggable (unlocked).
