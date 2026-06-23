@@ -16,23 +16,30 @@ enum GeminiProtocol {
     // MARK: Outgoing
 
     /// `setup` message. See translation-bridge.ts:328-354.
-    static func setupMessage(targetLanguage: String) -> [String: Any] {
-        return [
-            "setup": [
-                "model": model,
-                "outputAudioTranscription": [:] as [String: Any],
-                "generationConfig": [
-                    "responseModalities": ["AUDIO"],
-                    "translationConfig": [
-                        "targetLanguageCode": targetLanguage,
-                        "echoTargetLanguage": true
-                    ] as [String: Any]
-                ] as [String: Any],
-                "realtimeInputConfig": [
-                    "automaticActivityDetection": ["disabled": false] as [String: Any]
+    /// When `bilingual` is true, also enables `inputAudioTranscription` so the
+    /// server returns the original (source) transcript alongside the
+    /// translation.
+    static func setupMessage(targetLanguage: String, bilingual: Bool = false) -> [String: Any] {
+        var setup: [String: Any] = [
+            "model": model,
+            "outputAudioTranscription": [:] as [String: Any],
+            "generationConfig": [
+                "responseModalities": ["AUDIO"],
+                "translationConfig": [
+                    "targetLanguageCode": targetLanguage,
+                    "echoTargetLanguage": true
                 ] as [String: Any]
+            ] as [String: Any],
+            "realtimeInputConfig": [
+                "automaticActivityDetection": ["disabled": false] as [String: Any]
             ] as [String: Any]
         ]
+        if bilingual {
+            // Returns a transcript of the user's input audio (the source
+            // language) so the OSD can show original + translation.
+            setup["inputAudioTranscription"] = [:] as [String: Any]
+        }
+        return ["setup": setup]
     }
 
     /// `realtimeInput` audio chunk. See translation-bridge.ts:601-608.
@@ -58,10 +65,14 @@ enum GeminiProtocol {
     struct TranscriptionEvent {
         let text: String
         let isFinal: Bool
+        /// Source-language transcript when `inputAudioTranscription` is
+        /// enabled in setup; nil otherwise.
+        let original: String?
     }
 
-    /// Walks a server frame dict and returns a transcription event if one is
-    /// present. Mirrors translation-bridge.ts:356-418. Audio parts under
+    /// Extract the translation text and turnComplete flag from a server frame.
+    /// Returns nil when the frame carries no `outputTranscription`.
+    /// Mirrors translation-bridge.ts:356-418. Audio parts under
     /// `serverContent.modelTurn.parts[*].inlineData` are intentionally discarded.
     static func parseTranscription(from json: [String: Any]) -> TranscriptionEvent? {
         guard let serverContent = json["serverContent"] as? [String: Any] else { return nil }
@@ -74,7 +85,20 @@ enum GeminiProtocol {
         // usage because each interim chunk is emitted with turnComplete=false
         // until the final chunk where turnComplete=true marks the segment end.
         // We follow the reference exactly: pass `!turnComplete` as "interim".
-        return TranscriptionEvent(text: text, isFinal: !turnComplete)
+        return TranscriptionEvent(text: text, isFinal: !turnComplete, original: nil)
+    }
+
+    /// Extract the source-language (`inputTranscription`) text from a server
+    /// frame, if present. Bilingual mode: Gemini sends input and output
+    /// transcripts in SEPARATE frames, so the client has to buffer the latest
+    /// input text and pair it with the next output frame.
+    static func parseInputTranscription(from json: [String: Any]) -> String? {
+        guard let serverContent = json["serverContent"] as? [String: Any],
+              let inputTr = serverContent["inputTranscription"] as? [String: Any],
+              let s = inputTr["text"] as? String, !s.isEmpty else {
+            return nil
+        }
+        return s
     }
 
     static func isSetupComplete(_ json: [String: Any]) -> Bool {

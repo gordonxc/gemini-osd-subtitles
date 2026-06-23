@@ -40,17 +40,26 @@ mkdir -p "${APP_BUNDLE}/Contents/Resources"
 cp "$BIN" "${APP_BUNDLE}/Contents/MacOS/"
 cp "Sources/GeminiSubtitles/Assets/Info.plist" "${APP_BUNDLE}/Contents/"
 
-# Re-sign the bundle so the code-signing identifier matches CFBundleIdentifier.
-# SwiftPM ad-hoc signs with a hash-suffixed identifier that changes every build.
-# Using --identifier at least makes the identifier stable.
+# Re-sign the bundle with a stable code-signing identity so TCC permissions
+# (Screen Recording / System Audio Recording) persist across rebuilds.
+# Ad-hoc signing (cdhash-based) would force re-approval every build.
 #
-# NOTE: ad-hoc signed apps still have a cdhash-based designated requirement, so
-# TCC may require re-approval of System Audio Recording after each rebuild. To
-# get stable approval across rebuilds, sign with a real Developer ID certificate
-# or create a self-signed cert in Keychain Access and pass its name to --sign.
-echo ">> Code signing (adhoc, identifier=${BUNDLE_ID})…"
+# Identity source:
+#   1. $SIGN_IDENTITY env var (explicit override)
+#   2. "GeminiSubtitles Dev" — created by ./setup-cert.sh (one-time)
+#
+# If the identity is missing, fail loudly instead of silently falling back
+# to ad-hoc — that way you never accidentally ship a build that resets TCC.
+SIGN_IDENTITY="${SIGN_IDENTITY:-GeminiSubtitles Dev}"
+if ! security find-identity -p codesigning -v 2>/dev/null \
+     | grep -qF "$SIGN_IDENTITY"; then
+  echo "!! Code-signing identity \"$SIGN_IDENTITY\" not found." >&2
+  echo "!! Run ./setup-cert.sh once to create it, or set SIGN_IDENTITY." >&2
+  exit 1
+fi
+echo ">> Code signing (identity=${SIGN_IDENTITY}, identifier=${BUNDLE_ID})"
 codesign --force --deep \
-  --sign - \
+  --sign "$SIGN_IDENTITY" \
   --identifier "$BUNDLE_ID" \
   "$APP_BUNDLE"
 

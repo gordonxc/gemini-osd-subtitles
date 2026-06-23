@@ -14,7 +14,9 @@ final class GeminiClient {
     // MARK: Callbacks
 
     /// Emitted on every `outputTranscription.text` chunk.
-    var onTranscription: ((String, Bool) -> Void)?
+    /// Parameters: `(text, isFinal, original)` where `original` is the
+    /// source-language transcript when bilingual mode is enabled, else nil.
+    var onTranscription: ((String, Bool, String?) -> Void)?
     /// Emitted on transport-level errors or non-recoverable close codes.
     var onError: ((Error) -> Void)?
     /// Emitted when the client lifecycle state changes.
@@ -39,6 +41,9 @@ final class GeminiClient {
     private let session: URLSession
     private let apiKey: String
     private let targetLanguage: String
+    /// When true, setup enables `inputAudioTranscription` and parsed events
+    /// carry an `original` field.
+    private let bilingual: Bool
 
     private var task: URLSessionWebSocketTask?
     private var status: Status = .idle {
@@ -52,13 +57,20 @@ final class GeminiClient {
     /// Counts consecutive reconnect failures; resets on a clean setup.
     private var consecutiveReconnectFailures = 0
 
+    /// Most recent source-language transcript waiting to be paired with the
+    /// next translation frame. Bilingual mode only; Gemini sends input and
+    /// output transcripts as separate frames so we buffer the latest input
+    /// and attach it to the next output. Reset on stop / reconnect.
+    private var pendingOriginal: String?
+
     private let setupTimeout: TimeInterval = 15
     private let reconnectDelay: TimeInterval = 1
     private let maxReconnectAttempts = 3
 
-    init(apiKey: String, targetLanguage: String, session: URLSession? = nil) {
+    init(apiKey: String, targetLanguage: String, bilingual: Bool = false, session: URLSession? = nil) {
         self.apiKey = apiKey
         self.targetLanguage = targetLanguage
+        self.bilingual = bilingual
         if let session {
             self.session = session
         } else {
@@ -89,6 +101,7 @@ final class GeminiClient {
     func stop() {
         running = false
         setupComplete = false
+        pendingOriginal = nil
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
         status = .closed
@@ -133,6 +146,7 @@ final class GeminiClient {
         self.task = newTask
         self.status = .connecting
         self.setupComplete = false
+        self.pendingOriginal = nil
         newTask.resume()
 
         // Kick off the receive loop immediately; the setup message is sent
@@ -146,7 +160,7 @@ final class GeminiClient {
     private func sendSetup() {
         guard let task else { return }
         guard let payload = try? GeminiProtocol.encodeJSON(
-            GeminiProtocol.setupMessage(targetLanguage: targetLanguage)
+            GeminiProtocol.setupMessage(targetLanguage: targetLanguage, bilingual: bilingual)
         ) else { return }
         DebugLog.write("GeminiClient.sendSetup \(payload)")
         task.send(.string(payload)) { error in
@@ -221,7 +235,18 @@ final class GeminiClient {
         }
 
         if let event = GeminiProtocol.parseTranscription(from: json) {
-            onTranscription?(event.text, event.isFinal)
+            // Pair the buffered source-language transcript (if any) with this
+            // translation frame, then clear it so the next input frame starts
+            // fresh. This is what makes bilingual mode actually display the
+            // original — input and output arrive as separate frames.
+            let original = pendingOriginal
+            pendingOriginal = nil
+            onTranscription?(event.text, event.isFinal, original)
+        } else if let inputText = GeminiProtocol.parseInputTranscription(from: json) {
+            // Input-only frame: stash for the next output frame. Overwrite
+            // any prior pending text because Gemini emits growing fragments
+            // and the latest one is the most complete for the current segment.
+            pendingOriginal = inputText
         }
     }
 

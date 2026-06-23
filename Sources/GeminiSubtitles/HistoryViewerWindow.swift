@@ -99,18 +99,44 @@ final class HistoryViewerWindow: NSWindow {
     }
 
     private func rebuildText() {
-        let lines = loadedEntries.map { entry in
-            "[\(HistoryStore.entryTime(entry.ts))] \(entry.text)"
+        let rich = NSMutableAttributedString()
+        for entry in loadedEntries {
+            rich.append(entryAttributedString(entry))
         }
-        let rich = NSAttributedString(
-            string: lines.joined(separator: "\n"),
-            attributes: [
-                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
-                .foregroundColor: NSColor.labelColor,
-            ])
         textView.textStorage?.setAttributedString(rich)
         // Scroll to bottom so the latest line is visible.
         scrollToEnd()
+    }
+
+    /// Render one entry as an attributed string. In bilingual sessions the
+    /// source-language line is shown below the translation in a muted color.
+    private func entryAttributedString(_ entry: HistoryEntry) -> NSAttributedString {
+        let tsAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ]
+        let textAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+            .foregroundColor: NSColor.labelColor,
+        ]
+        let originalAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+            .foregroundColor: NSColor.tertiaryLabelColor,
+        ]
+
+        let result = NSMutableAttributedString()
+        result.append(NSAttributedString(
+            string: "[\(HistoryStore.entryTime(entry.ts))] ",
+            attributes: tsAttrs))
+        result.append(NSAttributedString(
+            string: "\(entry.text)\n",
+            attributes: textAttrs))
+        if let original = entry.original, !original.isEmpty {
+            result.append(NSAttributedString(
+                string: "                \(original)\n",
+                attributes: originalAttrs))
+        }
+        return result
     }
 
     private func scrollToEnd() {
@@ -132,18 +158,8 @@ final class HistoryViewerWindow: NSWindow {
 
     /// Append a single entry without reflowing the whole text view.
     private func appendLine(_ entry: HistoryEntry) {
-        let line = "[\(HistoryStore.entryTime(entry.ts))] \(entry.text)\n"
-        let attr = NSAttributedString(
-            string: line,
-            attributes: [
-                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
-                .foregroundColor: NSColor.labelColor,
-            ])
         let storage = textView.textStorage
-        let startIdx = (storage?.length ?? 0)
-        storage?.append(attr)
-        // Need at least one char in storage for the empty case — guard above.
-        _ = startIdx
+        storage?.append(entryAttributedString(entry))
         scrollToEnd()
     }
 

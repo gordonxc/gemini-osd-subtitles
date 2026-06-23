@@ -45,6 +45,9 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     /// 0 = off).
     private let selectedAutoStopKey = "com.gemini-subtitles.autoStopMinutes"
 
+    /// User-defaults key for the bilingual OSD toggle (bool, default false).
+    private let bilingualKey = "com.gemini-subtitles.bilingual"
+
     /// Available OSD font sizes (points). Default is 20.
     static let fontSizes: [Int] = [14, 18, 20, 24, 28, 32, 40, 48, 56, 64, 72]
     static let defaultFontSize: Int = 20
@@ -130,6 +133,15 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         }
         autoStopParent.submenu = autoStopMenu
         menu.addItem(autoStopParent)
+
+        // --- Bilingual toggle (original + translation overlay) ---
+        let bilingualOn = bilingualEnabled()
+        let bilingual = NSMenuItem(
+            title: bilingualOn ? "Bilingual: On" : "Bilingual: Off",
+            action: #selector(toggleBilingual),
+            keyEquivalent: "")
+        bilingual.target = self
+        menu.addItem(bilingual)
 
         menu.addItem(.separator())
 
@@ -247,6 +259,15 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         rebuildMenuInPlace()
         // AppCoordinator reads the new value on its next poll tick — no
         // need to push it explicitly.
+    }
+
+    @objc private func toggleBilingual() {
+        let newValue = !bilingualEnabled()
+        UserDefaults.standard.set(newValue, forKey: bilingualKey)
+        rebuildMenuInPlace()
+        // Bilingual requires a fresh Gemini setup (different setup message),
+        // so restart the pipeline if currently running.
+        restartPipelineIfRunning()
     }
 
     /// Rebuild the status item's menu so parent titles reflect the new
@@ -546,6 +567,11 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         let stored = UserDefaults.standard.integer(forKey: selectedAutoStopKey)
         guard Self.autoStopOptions.contains(stored) else { return 0 }
         return stored
+    }
+
+    /// Returns whether bilingual OSD overlay is enabled.
+    func bilingualEnabled() -> Bool {
+        UserDefaults.standard.bool(forKey: bilingualKey)
     }
 
     private func refreshStartStopTitle() {

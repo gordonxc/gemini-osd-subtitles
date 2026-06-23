@@ -1,18 +1,13 @@
 #!/bin/bash
-# Rebuild + re-bundle + launch the GeminiSubtitles app properly.
-# Use this instead of `swift run` so TCC sees a stable bundle identity.
+# Launch the GeminiSubtitles app after rebuilding it.
+# Delegates the build + bundle step to build.sh, then launches the .app
+# via `open` so TCC sees a proper bundle context.
 
 set -e
 cd "$(dirname "$0")"
 
-echo ">> Building release binary"
-swift build -c release
-
-echo ">> Updating bundle executable"
-cp .build/release/GeminiSubtitles GeminiSubtitles.app/Contents/MacOS/GeminiSubtitles
-
-echo ">> Re-signing bundle (adhoc)"
-codesign --force --deep --sign - GeminiSubtitles.app
+echo ">> Building (release) via build.sh"
+./build.sh release
 
 echo ">> Launching app via 'open' (proper bundle context for TCC)"
 open -a "$(pwd)/GeminiSubtitles.app"

@@ -65,6 +65,10 @@ final class AppCoordinator {
 
     private var currentTargetLanguage: String = Languages.defaultCode
     private var currentAudioSource: AudioSource = .system(audioSourceUID: nil)
+    private var currentBilingual: Bool = false
+
+    /// User-defaults key for the bilingual OSD toggle.
+    private let bilingualUDKey = "com.gemini-subtitles.bilingual"
 
     /// True after `start()` until audio capture has begun. Used to gate the
     /// one-shot `beginAudioCaptureIfRunning()` call from `handleGeminiStatus(.ready)`.
@@ -74,6 +78,7 @@ final class AppCoordinator {
     /// to the OSD, plus the pending work item. Reduces main-thread hops when
     /// Gemini bursts many small fragments.
     private var pendingTranscription: String?
+    private var pendingOriginal: String?
     private var pendingTranscriptionWork: DispatchWorkItem?
 
     /// Reusable timer that demotes `.receivingAudio` back to `.active` after
@@ -121,7 +126,8 @@ final class AppCoordinator {
     func start(targetLanguage: String, audioSource: AudioSource) {
         currentTargetLanguage = targetLanguage
         currentAudioSource = audioSource
-        DebugLog.write("AppCoordinator.start targetLanguage=\(targetLanguage) audioSource=\(audioSource)")
+        currentBilingual = UserDefaults.standard.bool(forKey: bilingualUDKey)
+        DebugLog.write("AppCoordinator.start targetLanguage=\(targetLanguage) audioSource=\(audioSource) bilingual=\(currentBilingual)")
 
         // 1. API key check.
         guard let apiKey = KeychainStore.getAPIKey(), !apiKey.isEmpty else {
@@ -187,9 +193,15 @@ final class AppCoordinator {
 
         // Build Gemini client.
         DebugLog.write("AppCoordinator.start got API key (length=\(apiKey.count), prefix=\(apiKey.prefix(8)), suffix=\(apiKey.suffix(4)))")
-        let client = GeminiClient(apiKey: apiKey, targetLanguage: targetLanguage)
-        client.onTranscription = { [weak self] text, isFinal in
-            self?.subtitleBuffer.append(text)
+        let client = GeminiClient(apiKey: apiKey, targetLanguage: targetLanguage, bilingual: currentBilingual)
+        client.onTranscription = { [weak self] text, isFinal, original in
+            // Gemini callbacks arrive on the URLSession delegate queue
+            // (background). The buffer + OSD pipeline touch AppKit, so hop
+            // to the main thread first. Calling NSTextField.isHidden /
+            // layout setters from the WS delegate thread will crash AppKit.
+            DispatchQueue.main.async {
+                self?.subtitleBuffer.append(text, original: original)
+            }
         }
         client.onError = { [weak self] error in
             self?.handleGeminiError(error)
@@ -247,8 +259,8 @@ final class AppCoordinator {
             if storedSize > 0 {
                 self.setSubtitleFontSize(CGFloat(storedSize))
             }
-            self.subtitleBuffer.onUpdate = { [weak self] text in
-                self?.scheduleTranscriptionUpdate(text)
+            self.subtitleBuffer.onUpdate = { [weak self] text, original in
+                self?.scheduleTranscriptionUpdate(text, original: original)
             }
             self.subtitleWindow.reveal()
         }
@@ -293,6 +305,7 @@ final class AppCoordinator {
         pendingTranscriptionWork?.cancel()
         pendingTranscriptionWork = nil
         pendingTranscription = nil
+        pendingOriginal = nil
         autoStopPollTimer?.cancel()
         autoStopPollTimer = nil
         lastAudioActivityAt = nil
@@ -320,8 +333,9 @@ final class AppCoordinator {
     /// on each one causes redundant layout passes. We flush immediately on
     /// the first update after a quiet period, then collapse any subsequent
     /// updates arriving within the throttle window into a single flush.
-    private func scheduleTranscriptionUpdate(_ text: String) {
+    private func scheduleTranscriptionUpdate(_ text: String, original: String?) {
         pendingTranscription = text
+        pendingOriginal = original
         // If a flush is already scheduled, the latest text will be used when
         // it fires — no need to schedule another.
         if pendingTranscriptionWork != nil { return }
@@ -344,9 +358,11 @@ final class AppCoordinator {
     private func flushPendingTranscription() {
         guard let text = pendingTranscription else { return }
         pendingTranscription = nil
-        subtitleWindow.update(text: text, isFinal: false)
+        let original = pendingOriginal
+        pendingOriginal = nil
+        subtitleWindow.update(text: text, isFinal: false, original: original)
         // Persist the finalised line to the history session file.
-        history.append(text: text)
+        history.append(text: text, original: original)
     }
 
     /// Toggle the OSD between click-through (locked) and draggable (unlocked).
@@ -380,7 +396,7 @@ final class AppCoordinator {
                 self.runState = .receivingAudio
             }
             if self.runState == .receivingAudio {
-                self.lastStatusText = "Listening · \(Languages.name(forCode: self.currentTargetLanguage))"
+                self.lastStatusText = self.bilingualStatusLine(prefix: "Listening")
                 self.armSilenceDemotionTimer()
             }
         }
@@ -402,7 +418,7 @@ final class AppCoordinator {
         timer.setEventHandler { [weak self] in
             guard let self, self.runState == .receivingAudio else { return }
             self.runState = .active
-            self.lastStatusText = "Running · \(Languages.name(forCode: self.currentTargetLanguage))"
+            self.lastStatusText = self.bilingualStatusLine(prefix: "Running")
             // Audio has gone silent — clear and hide the OSD so the last line
             // doesn't linger on screen.
             self.subtitleBuffer.reset()
@@ -446,7 +462,7 @@ final class AppCoordinator {
         switch status {
         case .ready:
             runState = .active
-            lastStatusText = "Running · \(Languages.name(forCode: currentTargetLanguage))"
+            lastStatusText = bilingualStatusLine(prefix: "Running")
             // Kick off audio capture now that the WebSocket is set up. The
             // 5 s fallback in start() covers the rare case where .ready
             // never fires.
@@ -540,5 +556,19 @@ final class AppCoordinator {
                 self?.statusChanged?(state, text)
             }
         }
+    }
+
+    /// Build the status line. In bilingual mode shows the source language
+    /// name → target language name; otherwise just the target.
+    /// Example: "Listening · English → Cantonese".
+    private func bilingualStatusLine(prefix: String) -> String {
+        let targetName = Languages.name(forCode: currentTargetLanguage)
+        guard currentBilingual else {
+            return "\(prefix) · \(targetName)"
+        }
+        // The source language is auto-detected by Gemini; surface it as
+        // "Auto" because we never learn the actual detected code from the
+        // server (inputTranscription carries no language tag).
+        return "\(prefix) · Auto → \(targetName)"
     }
 }

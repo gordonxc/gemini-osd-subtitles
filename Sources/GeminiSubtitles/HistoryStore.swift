@@ -4,6 +4,9 @@ import Foundation
 struct HistoryEntry: Codable {
     let ts: Date
     let text: String
+    /// Source-language original when bilingual mode is enabled; nil for
+    /// older sessions and translation-only runs.
+    let original: String?
 }
 
 /// Lightweight metadata about a session file, derived from disk without
@@ -109,15 +112,19 @@ final class HistoryStore {
 
     /// Append a finalised subtitle line. No-op if no session is open.
     /// Called from `AppCoordinator.scheduleTranscriptionUpdate`.
-    func append(text: String) {
+    /// `original` is the source-language transcript when bilingual mode is on.
+    func append(text: String, original: String? = nil) {
         guard let handle = currentFileHandle else { return }
-        let entry = HistoryEntry(ts: Date(), text: text)
+        let entry = HistoryEntry(ts: Date(), text: text, original: original)
         currentEntries.append(entry)
 
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "ts": Self.isoFormatter.string(from: entry.ts),
             "text": entry.text,
         ]
+        if let original = original, !original.isEmpty {
+            payload["original"] = original
+        }
         if let data = try? JSONSerialization.data(withJSONObject: payload),
            data.count > 0 {
             try? handle.write(contentsOf: data)
@@ -175,7 +182,8 @@ final class HistoryStore {
                   let ts = Self.isoFormatter.date(from: tsStr),
                   let text = obj["text"] as? String
             else { continue }
-            entries.append(HistoryEntry(ts: ts, text: text))
+            let original = obj["original"] as? String
+            entries.append(HistoryEntry(ts: ts, text: text, original: original))
         }
         return entries
     }

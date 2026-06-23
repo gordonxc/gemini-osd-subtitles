@@ -29,16 +29,21 @@ enum HistoryExporter {
         }
     }
 
-    // MARK: txt — `[HH:mm:ss] text` per line
+    // MARK: txt — `[HH:mm:ss] text` per line (plus optional original above)
 
     private static func renderTxt(_ entries: [HistoryEntry]) -> Data {
         let df = DateFormatter()
         df.locale = Locale(identifier: "en_US_POSIX")
         df.timeZone = TimeZone.current
         df.dateFormat = "HH:mm:ss"
-        let body = entries
-            .map { "[\(df.string(from: $0.ts))] \($0.text)" }
-            .joined(separator: "\n")
+        let body = entries.map { entry -> String in
+            let ts = df.string(from: entry.ts)
+            if let original = entry.original, !original.isEmpty {
+                // Two lines per entry: translation then indented original.
+                return "[\(ts)] \(entry.text)\n[\(ts)]   \(original)"
+            }
+            return "[\(ts)] \(entry.text)"
+        }.joined(separator: "\n")
         return (body + "\n").data(using: .utf8) ?? Data()
     }
 
@@ -52,6 +57,7 @@ enum HistoryExporter {
         df.dateFormat = "HH:mm:ss,SSS"
 
         var out = ""
+        var counter = 0
         for (idx, entry) in entries.enumerated() {
             let start = entry.ts
             let end: Date = {
@@ -60,20 +66,32 @@ enum HistoryExporter {
                 }
                 return entry.ts.addingTimeInterval(3.0)
             }()
-            out += "\(idx + 1)\n"
+            counter += 1
+            out += "\(counter)\n"
             out += "\(df.string(from: start)) --> \(df.string(from: end))\n"
-            out += "\(entry.text)\n\n"
+            if let original = entry.original, !original.isEmpty {
+                out += "\(original)\n\(entry.text)\n\n"
+            } else {
+                out += "\(entry.text)\n\n"
+            }
         }
         return out.data(using: .utf8) ?? Data()
     }
 
-    // MARK: json — array of {ts, text} with ISO timestamps
+    // MARK: json — array of {ts, text, original?} with ISO timestamps
 
     private static func renderJson(_ entries: [HistoryEntry]) -> Data {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
-        let payload: [[String: String]] = entries.map {
-            ["ts": iso.string(from: $0.ts), "text": $0.text]
+        let payload: [[String: Any]] = entries.map { entry in
+            var dict: [String: Any] = [
+                "ts": iso.string(from: entry.ts),
+                "text": entry.text,
+            ]
+            if let original = entry.original, !original.isEmpty {
+                dict["original"] = original
+            }
+            return dict
         }
         return (try? JSONSerialization.data(
             withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])) ?? Data()

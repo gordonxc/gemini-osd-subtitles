@@ -49,9 +49,11 @@ final class SubtitleWindow: NSPanel {
     }
 
     /// Show/update the current line. Resets the auto-fade timer.
-    func update(text: String, isFinal: Bool) {
+    /// `original` carries the source-language line when bilingual mode is on;
+    /// pass nil to hide the original line.
+    func update(text: String, isFinal: Bool, original: String? = nil) {
         guard let subtitleView else { return }
-        subtitleView.update(text: text)
+        subtitleView.update(text: text, original: original)
 
         if alphaValue < 1.0 {
             // Fade in.
@@ -75,7 +77,7 @@ final class SubtitleWindow: NSPanel {
         fadeTimer?.invalidate()
         orderOut(nil)
         alphaValue = 0.0
-        subtitleView?.update(text: "")
+        subtitleView?.update(text: "", original: nil)
     }
 
     /// Allow dragging the OSD. Cancels any pending fade so the user can see
@@ -99,11 +101,14 @@ final class SubtitleWindow: NSPanel {
     }
 
     /// Resize the OSD to fit a new font size, preserving the horizontal
-    /// center. Height accommodates 2 wrapped lines; width scales with the
-    /// font and is capped to leave margin on the screen.
+    /// center. Height accommodates 2 wrapped translation lines plus an
+    /// optional smaller original line above (bilingual mode); width scales
+    /// with the font and is capped to leave margin on the screen.
     func resizeForFontSize(_ size: CGFloat) {
         let lineHeight = size * 1.4
-        let newHeight = max(84, Int(lineHeight * 2 + 16))
+        // 2 translation lines + 1 original line (~0.7×) + padding.
+        let originalContribution = Int(size * 0.7 * 1.4)
+        let newHeight = max(84, Int(lineHeight * 2 + 16) + originalContribution)
         let preferredWidth = Int(size * 36)   // ~ comfortable for a subtitle line
         let maxWidth: Int = {
             guard let screen = NSScreen.main else { return 1600 }
