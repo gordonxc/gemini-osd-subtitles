@@ -1,9 +1,10 @@
 import Foundation
 import AppKit
+import AVFoundation
 
 /// Orchestrates the end-to-end pipeline:
 ///
-///     ScreenCaptureKit → Float32 → AudioPipeline (Int16+base64) → GeminiClient
+///     ScreenCaptureKit / AVAudioEngine → Float32 → AudioPipeline (Int16+base64) → GeminiClient
 ///                                                                   ↓
 ///     SubtitleWindow ← (onTranscription)
 ///
@@ -28,6 +29,17 @@ final class AppCoordinator {
         case languageChanged
     }
 
+    /// Which audio input to capture from.
+    enum AudioSource: Equatable {
+        /// System audio via ScreenCaptureKit. `uid` selects a specific
+        /// output device for the menu picker (currently advisory under
+        /// SCStream — capture always uses the main display's audio).
+        case system(audioSourceUID: String?)
+        /// Microphone via AVAudioEngine. `uid` of nil/empty = system
+        /// default input device.
+        case microphone(deviceUID: String?)
+    }
+
     weak var delegate: AppCoordinatorDelegate?
 
     /// Updated by AppDelegate on each state transition to update the icon and
@@ -40,6 +52,7 @@ final class AppCoordinator {
 
     private var gemini: GeminiClient?
     private var capture: AudioCapture?
+    private var micCapture: MicrophoneCapture?
     private let pipeline = AudioPipeline()
     private lazy var subtitleWindow: SubtitleWindow = SubtitleWindow()
     private let subtitleBuffer = SubtitleBuffer()
@@ -51,6 +64,7 @@ final class AppCoordinator {
     let history = HistoryStore()
 
     private var currentTargetLanguage: String = Languages.defaultCode
+    private var currentAudioSource: AudioSource = .system(audioSourceUID: nil)
 
     /// True after `start()` until audio capture has begun. Used to gate the
     /// one-shot `beginAudioCaptureIfRunning()` call from `handleGeminiStatus(.ready)`.
@@ -67,7 +81,10 @@ final class AppCoordinator {
     /// stops flowing (e.g. user pauses the video).
     private var silenceDemotionTimer: DispatchSourceTimer?
     /// Seconds of consecutive silence before the icon demotes blue → green.
-    private let silenceDemotionSeconds: TimeInterval = 3.0
+    /// Short for system audio (user paused video); long for mic because
+    /// speech has natural multi-second pauses between sentences.
+    private let silenceDemotionSecondsSystem: TimeInterval = 3.0
+    private let silenceDemotionSecondsMic: TimeInterval = 10.0
 
     /// User-defaults key for the auto-stop inactivity timeout in minutes
     /// (0 = off). Read on every poll tick so the menu can change it live.
@@ -92,12 +109,19 @@ final class AppCoordinator {
     }
 
     func start(targetLanguage: String) {
-        start(targetLanguage: targetLanguage, audioSourceUID: nil)
+        start(targetLanguage: targetLanguage, audioSource: .system(audioSourceUID: nil))
     }
 
+    /// Legacy entry point preserved for older call sites.
     func start(targetLanguage: String, audioSourceUID: String?) {
+        start(targetLanguage: targetLanguage,
+              audioSource: .system(audioSourceUID: audioSourceUID))
+    }
+
+    func start(targetLanguage: String, audioSource: AudioSource) {
         currentTargetLanguage = targetLanguage
-        DebugLog.write("AppCoordinator.start targetLanguage=\(targetLanguage) audioSourceUID=\(audioSourceUID ?? "<default>")")
+        currentAudioSource = audioSource
+        DebugLog.write("AppCoordinator.start targetLanguage=\(targetLanguage) audioSource=\(audioSource)")
 
         // 1. API key check.
         guard let apiKey = KeychainStore.getAPIKey(), !apiKey.isEmpty else {
@@ -114,6 +138,46 @@ final class AppCoordinator {
 
         NotificationManager.shared.requestAuthorizationIfNeeded()
 
+        // 2. Mic source requires TCC Microphone permission. Request up
+        // front; if denied or still pending, surface the deep-link and
+        // bail. The actual `beginStart` runs after the system prompt
+        // resolves.
+        if case .microphone = audioSource {
+            let granted = AVAudioApplication.shared.recordPermission == .granted
+            if granted {
+                beginStart(apiKey: apiKey)
+            } else {
+                runState = .starting
+                lastStatusText = "Requesting microphone permission…"
+                AVAudioApplication.requestRecordPermission { [weak self] ok in
+                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        if ok {
+                            self.beginStart(apiKey: apiKey)
+                        } else {
+                            self.runState = .error
+                            self.lastStatusText = "Microphone permission denied"
+                            NotificationManager.shared.notify(
+                                title: "Microphone permission needed",
+                                body: "Grant access in System Settings → Privacy & Security → Microphone, then click Start."
+                            )
+                            Permissions.openMicrophoneSettings()
+                        }
+                    }
+                }
+            }
+            return
+        }
+
+        beginStart(apiKey: apiKey)
+    }
+
+    /// Inner start logic, called once mic permission (if applicable) has
+    /// been confirmed.
+    private func beginStart(apiKey: String) {
+        let targetLanguage = currentTargetLanguage
+        let audioSource = currentAudioSource
+
         runState = .starting
         lastStatusText = "Connecting to Gemini…"
 
@@ -121,7 +185,7 @@ final class AppCoordinator {
         // in the right place.
         history.beginSession(languageCode: targetLanguage)
 
-        // 2. Build Gemini client.
+        // Build Gemini client.
         DebugLog.write("AppCoordinator.start got API key (length=\(apiKey.count), prefix=\(apiKey.prefix(8)), suffix=\(apiKey.suffix(4)))")
         let client = GeminiClient(apiKey: apiKey, targetLanguage: targetLanguage)
         client.onTranscription = { [weak self] text, isFinal in
@@ -135,29 +199,44 @@ final class AppCoordinator {
         }
         self.gemini = client
 
-        // 3. Build audio capture + pipeline.
-        let audioCapture = AudioCapture()
-        audioCapture.deviceUID = (audioSourceUID?.isEmpty == false) ? audioSourceUID : nil
-        audioCapture.onSamples = { [weak self] samples, count, silent in
-            // Skip the pipeline entirely when the batch is silent so we make
-            // no Gemini API calls during idle periods (e.g. user pauses the
-            // video). The pipeline's internal partial buffer is preserved
-            // and resumes filling once non-silent audio returns.
-            guard !silent else { return }
-            self?.pipeline.process(samples: samples, count: count)
-            self?.markAudioReceived()
+        // Build the appropriate audio capture + pipeline.
+        switch audioSource {
+        case .system(let uid):
+            let audioCapture = AudioCapture()
+            audioCapture.deviceUID = (uid?.isEmpty == false) ? uid : nil
+            audioCapture.onError = { [weak self] error in
+                self?.handleAudioError(error)
+            }
+            audioCapture.onSamples = { [weak self] samples, count, silent in
+                // Skip the pipeline entirely when the batch is silent so we make
+                // no Gemini API calls during idle periods (e.g. user pauses the
+                // video). The pipeline's internal partial buffer is preserved
+                // and resumes filling once non-silent audio returns.
+                guard !silent else { return }
+                self?.pipeline.process(samples: samples, count: count)
+                self?.markAudioReceived()
+            }
+            self.capture = audioCapture
+        case .microphone(let uid):
+            let mic = MicrophoneCapture()
+            mic.deviceUID = (uid?.isEmpty == false) ? uid : nil
+            mic.onSamples = { [weak self] samples, count, silent in
+                guard !silent else { return }
+                self?.pipeline.process(samples: samples, count: count)
+                self?.markAudioReceived()
+            }
+            mic.onError = { [weak self] error in
+                self?.handleMicError(error)
+            }
+            self.micCapture = mic
         }
-        audioCapture.onError = { [weak self] error in
-            self?.handleAudioError(error)
-        }
-        self.capture = audioCapture
 
-        // 4. Wire pipeline chunks → GeminiClient.sendAudio.
+        // Wire pipeline chunks → GeminiClient.sendAudio.
         pipeline.onChunk = { [weak self] base64 in
             self?.gemini?.sendAudio(base64PCM: base64)
         }
 
-        // 5. Start Gemini first; audio kicks in once setup is complete.
+        // Start Gemini first; audio kicks in once setup is complete.
         client.start()
 
         // Show the OSD so it's ready to receive the first line.
@@ -174,7 +253,7 @@ final class AppCoordinator {
             self.subtitleWindow.reveal()
         }
 
-        // 6. Start audio capture when Gemini reaches `.ready` (handled in
+        // Start audio capture when Gemini reaches `.ready` (handled in
         // `handleGeminiStatus`). A 5 s fallback covers the rare case where
         // `.ready` never fires — capture still starts so we can show the
         // blue icon and diagnose whether audio is flowing.
@@ -185,15 +264,26 @@ final class AppCoordinator {
             self.beginAudioCaptureIfRunning()
         }
 
-        // 7. Arm the auto-stop inactivity timer. Counts from session start;
+        // Arm the auto-stop inactivity timer. Counts from session start;
         // every non-silent audio batch bumps `lastAudioActivityAt`.
         lastAudioActivityAt = Date()
         startAutoStopPollTimer()
     }
 
+    private func handleMicError(_ error: Error) {
+        runState = .error
+        lastStatusText = "Mic: \(error.localizedDescription)"
+        NotificationManager.shared.notify(
+            title: "Microphone capture error",
+            body: error.localizedDescription
+        )
+    }
+
     func stop(reason: StopReason) {
         capture?.stop()
         capture = nil
+        micCapture?.stop()
+        micCapture = nil
         gemini?.stop()
         gemini = nil
         pipeline.reset()
@@ -296,13 +386,19 @@ final class AppCoordinator {
         }
     }
 
-    /// (Re)start the 3 s timer. On fire, demote `.receivingAudio → .active`
-    /// so the icon goes blue → green when audio stops flowing (e.g. user
-    /// pauses the video).
+    /// (Re)start the silence-demotion timer. The timeout depends on the
+    /// current source: short for system audio (user paused video → drop OSD
+    /// quickly), long for mic (speech has natural pauses between sentences).
     private func armSilenceDemotionTimer() {
         silenceDemotionTimer?.cancel()
+        let seconds: TimeInterval = {
+            if case .microphone = currentAudioSource {
+                return silenceDemotionSecondsMic
+            }
+            return silenceDemotionSecondsSystem
+        }()
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + silenceDemotionSeconds)
+        timer.schedule(deadline: .now() + seconds)
         timer.setEventHandler { [weak self] in
             guard let self, self.runState == .receivingAudio else { return }
             self.runState = .active
@@ -419,10 +515,18 @@ final class AppCoordinator {
         }
         do {
             DebugLog.write("AppCoordinator.beginAudioCaptureIfRunning: starting capture")
-            try capture?.start()
+            if let mic = micCapture {
+                try mic.start()
+            } else {
+                try capture?.start()
+            }
         } catch {
             DebugLog.write("AppCoordinator.beginAudioCaptureIfRunning FAILED: \(error.localizedDescription)")
-            handleAudioError(error)
+            if micCapture != nil {
+                handleMicError(error)
+            } else {
+                handleAudioError(error)
+            }
         }
     }
 

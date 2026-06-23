@@ -35,4 +35,18 @@ enum Permissions {
             }
         }
     }
+
+    /// Deep-link to **Privacy & Security → Microphone**.
+    static func openMicrophoneSettings() {
+        let candidates = [
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy",
+            "x-apple.systempreferences:"
+        ]
+        for spec in candidates {
+            if let url = URL(string: spec), NSWorkspace.shared.open(url) {
+                return
+            }
+        }
+    }
 }

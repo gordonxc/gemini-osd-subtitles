@@ -19,9 +19,9 @@
     <key>LSMinimumSystemVersion</key>
     <string>13.2</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Gemini Subtitles captures system audio to translate it into on-screen subtitles.</string>
+    <string>Gemini Subtitles captures system audio or microphone input to translate it into on-screen subtitles.</string>
     <key>NSAudioCaptureUsageDescription</key>
-    <string>Gemini Subtitles captures system audio to translate it into on-screen subtitles.</string>
+    <string>Gemini Subtitles captures system audio or microphone input to translate it into on-screen subtitles.</string>
     <key>NSSystemAudioRecordingUsageDescription</key>
     <string>Gemini Subtitles captures system audio to translate it into on-screen subtitles.</string>
     <key>NSScreenCaptureDescription</key>

@@ -30,6 +30,14 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     /// (empty string = system default).
     private let selectedAudioSourceKey = "com.gemini-subtitles.selectedAudioSource"
 
+    /// User-defaults key for the explicit microphone device UID
+    /// (empty string = system default input).
+    private let selectedMicSourceKey = "com.gemini-subtitles.selectedMicSource"
+
+    /// User-defaults key for the audio source kind ("system" or "mic").
+    /// Defaults to "system" to preserve prior behavior.
+    private let selectedSourceKindKey = "com.gemini-subtitles.audioSourceKind"
+
     /// User-defaults key for the OSD font size (points).
     private let selectedFontSizeKey = "com.gemini-subtitles.fontSize"
 
@@ -88,28 +96,8 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         langParent.submenu = langMenu
         menu.addItem(langParent)
 
-        // --- Audio Source submenu ---
-        let currentSource = selectedAudioSourceUID()
-        let sourceLabel = currentSource.isEmpty ? "System Default" : (AudioCapture.enumerateOutputDevices().first { $0.uid == currentSource }?.name ?? "Custom")
-        let sourceParent = NSMenuItem(title: "Audio Source: \(sourceLabel)", action: nil, keyEquivalent: "")
-        let sourceMenu = NSMenu()
-        let systemItem = NSMenuItem(title: "System Default", action: #selector(selectAudioSource(_:)), keyEquivalent: "")
-        systemItem.target = self
-        systemItem.representedObject = ""   // empty = system default
-        systemItem.state = currentSource.isEmpty ? .on : .off
-        sourceMenu.addItem(systemItem)
-        if !AudioCapture.enumerateOutputDevices().isEmpty {
-            sourceMenu.addItem(.separator())
-        }
-        for device in AudioCapture.enumerateOutputDevices() {
-            let item = NSMenuItem(title: device.name, action: #selector(selectAudioSource(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = device.uid
-            item.state = (device.uid == currentSource) ? .on : .off
-            sourceMenu.addItem(item)
-        }
-        sourceParent.submenu = sourceMenu
-        menu.addItem(sourceParent)
+        // --- Audio Source submenu (two-level) ---
+        buildAudioSourceSubmenu()
 
         // --- Font Size submenu ---
         let currentSize = selectedFontSize()
@@ -200,8 +188,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         switch coordinator.runState {
         case .stopped, .error:
             let language = selectedLanguageCode()
-            let source = selectedAudioSourceUID()
-            coordinator.start(targetLanguage: language, audioSourceUID: source.isEmpty ? nil : source)
+            coordinator.start(targetLanguage: language, audioSource: currentAudioSource())
         default:
             coordinator.stop(reason: .userRequested)
         }
@@ -216,22 +203,35 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             || coordinator?.runState == .starting
             || coordinator?.runState == .receivingAudio {
             coordinator?.stop(reason: .languageChanged)
-            coordinator?.start(targetLanguage: code)
+            coordinator?.start(targetLanguage: code, audioSource: currentAudioSource())
         }
     }
 
     @objc private func selectAudioSource(_ sender: NSMenuItem) {
         guard let uid = sender.representedObject as? String else { return }
         UserDefaults.standard.set(uid, forKey: selectedAudioSourceKey)
+        UserDefaults.standard.set("system", forKey: selectedSourceKindKey)
         rebuildMenuInPlace()
-        // If we're mid-run, restart capture with the new source.
-        if coordinator?.runState == .active
+        restartPipelineIfRunning()
+    }
+
+    @objc private func selectMicSource(_ sender: NSMenuItem) {
+        guard let uid = sender.representedObject as? String else { return }
+        UserDefaults.standard.set(uid, forKey: selectedMicSourceKey)
+        UserDefaults.standard.set("mic", forKey: selectedSourceKindKey)
+        rebuildMenuInPlace()
+        restartPipelineIfRunning()
+    }
+
+    /// Restart the pipeline using the currently-selected source kind + UID.
+    /// No-op when stopped.
+    private func restartPipelineIfRunning() {
+        guard coordinator?.runState == .active
             || coordinator?.runState == .starting
-            || coordinator?.runState == .receivingAudio {
-            let lang = selectedLanguageCode()
-            coordinator?.stop(reason: .languageChanged)
-            coordinator?.start(targetLanguage: lang, audioSourceUID: uid)
-        }
+            || coordinator?.runState == .receivingAudio else { return }
+        let lang = selectedLanguageCode()
+        coordinator?.stop(reason: .languageChanged)
+        coordinator?.start(targetLanguage: lang, audioSource: currentAudioSource())
     }
 
     @objc private func selectFontSize(_ sender: NSMenuItem) {
@@ -269,6 +269,100 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     @objc private func quit() {
         coordinator?.stop(reason: .userRequested)
         NSApp.terminate(nil)
+    }
+
+    // MARK: Audio Source submenu
+
+    /// Builds the two-level Audio Source ▸ submenu:
+    ///   System Audio ▸ (System Default + output devices)
+    ///   Microphone ▸ (System Default + input devices)
+    /// Current selection is marked with a checkmark at the leaf level.
+    private func buildAudioSourceSubmenu() {
+        let parent: NSMenuItem
+        let submenu = NSMenu()
+
+        // --- System Audio sub-submenu ---
+        let currentSysUID = selectedAudioSourceUID()
+        let isSysKind = selectedSourceKind() == "system"
+        let systemParent = NSMenuItem(
+            title: "System Audio", action: nil, keyEquivalent: "")
+        let systemMenu = NSMenu()
+
+        let sysDefault = NSMenuItem(
+            title: "System Default",
+            action: #selector(selectAudioSource(_:)),
+            keyEquivalent: "")
+        sysDefault.target = self
+        sysDefault.representedObject = ""
+        sysDefault.state = (isSysKind && currentSysUID.isEmpty) ? .on : .off
+        systemMenu.addItem(sysDefault)
+
+        let outputs = AudioCapture.enumerateOutputDevices()
+        if !outputs.isEmpty {
+            systemMenu.addItem(.separator())
+        }
+        for device in outputs {
+            let item = NSMenuItem(
+                title: device.name,
+                action: #selector(selectAudioSource(_:)),
+                keyEquivalent: "")
+            item.target = self
+            item.representedObject = device.uid
+            item.state = (isSysKind && device.uid == currentSysUID) ? .on : .off
+            systemMenu.addItem(item)
+        }
+        systemParent.submenu = systemMenu
+        submenu.addItem(systemParent)
+
+        // --- Microphone sub-submenu ---
+        let currentMicUID = selectedMicSourceUID()
+        let isMicKind = !isSysKind
+        let micParent = NSMenuItem(
+            title: "Microphone", action: nil, keyEquivalent: "")
+        let micMenu = NSMenu()
+
+        let micDefault = NSMenuItem(
+            title: "System Default",
+            action: #selector(selectMicSource(_:)),
+            keyEquivalent: "")
+        micDefault.target = self
+        micDefault.representedObject = ""
+        micDefault.state = (isMicKind && currentMicUID.isEmpty) ? .on : .off
+        micMenu.addItem(micDefault)
+
+        let inputs = MicrophoneCapture.enumerateInputDevices()
+        if !inputs.isEmpty {
+            micMenu.addItem(.separator())
+        }
+        for device in inputs {
+            let item = NSMenuItem(
+                title: device.name,
+                action: #selector(selectMicSource(_:)),
+                keyEquivalent: "")
+            item.target = self
+            item.representedObject = device.uid
+            item.state = (isMicKind && device.uid == currentMicUID) ? .on : .off
+            micMenu.addItem(item)
+        }
+        micParent.submenu = micMenu
+        submenu.addItem(micParent)
+
+        // Label the top-level item with the current kind + selected device.
+        let topLabel: String = {
+            if isMicKind {
+                let micLabel = currentMicUID.isEmpty
+                    ? "System Default"
+                    : (inputs.first { $0.uid == currentMicUID }?.name ?? "Custom")
+                return "Audio Source: Microphone (\(micLabel))"
+            }
+            let sysLabel = currentSysUID.isEmpty
+                ? "System Default"
+                : (outputs.first { $0.uid == currentSysUID }?.name ?? "Custom")
+            return "Audio Source: System Audio (\(sysLabel))"
+        }()
+        parent = NSMenuItem(title: topLabel, action: nil, keyEquivalent: "")
+        parent.submenu = submenu
+        menu.addItem(parent)
     }
 
     // MARK: History submenu
@@ -409,6 +503,32 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     /// Returns the stored audio source device UID (empty = system default).
     func selectedAudioSourceUID() -> String {
         UserDefaults.standard.string(forKey: selectedAudioSourceKey) ?? ""
+    }
+
+    /// Returns the stored microphone device UID (empty = system default).
+    func selectedMicSourceUID() -> String {
+        UserDefaults.standard.string(forKey: selectedMicSourceKey) ?? ""
+    }
+
+    /// Returns the currently-selected source kind ("system" / "mic").
+    /// Defaults to "system".
+    func selectedSourceKind() -> String {
+        let stored = UserDefaults.standard.string(forKey: selectedSourceKindKey)
+            ?? "system"
+        return stored == "mic" ? "mic" : "system"
+    }
+
+    /// Builds the `AppCoordinator.AudioSource` value for the current
+    /// persisted selection.
+    func currentAudioSource() -> AppCoordinator.AudioSource {
+        switch selectedSourceKind() {
+        case "mic":
+            let uid = selectedMicSourceUID()
+            return .microphone(deviceUID: uid.isEmpty ? nil : uid)
+        default:
+            let uid = selectedAudioSourceUID()
+            return .system(audioSourceUID: uid.isEmpty ? nil : uid)
+        }
     }
 
     /// Returns the stored OSD font size in points (default 20).
