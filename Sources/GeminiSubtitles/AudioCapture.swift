@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import AVFoundation
 import CoreAudio
 import ScreenCaptureKit
@@ -23,6 +24,14 @@ final class AudioCapture: NSObject, SCStreamDelegate {
     /// Device UID override is currently a no-op under SCStream — capture
     /// always uses the main display's audio.
     var deviceUID: String?
+
+    /// When set, the SCContentFilter is restricted to this single
+    /// application via `SCContentFilter(display:including:exceptingWindows:)`,
+    /// so only that app's audio is captured. nil/empty = whole-system mix.
+    /// Resolved against `SCShareableContent.current.applications` at
+    /// `start()` time; if the app isn't running we fall back to the
+    /// whole-display filter (with a log line) rather than failing hard.
+    var applicationBundleID: String?
 
     private var stream: SCStream?
     private var running = false
@@ -52,7 +61,20 @@ final class AudioCapture: NSObject, SCStreamDelegate {
                     return
                 }
                 DebugLog.write("AudioCapture got shareable content: \(content.displays.count) display(s), using displayID=\(display.displayID)")
-                self.startStream(for: display)
+                // Resolve per-app filter target against currently-running
+                // apps. We pass the resolved SCRunningApplication along so
+                // startStream can build the including: filter without
+                // re-fetching shareable content.
+                var targetApp: SCRunningApplication? = nil
+                if let bid = self.applicationBundleID, !bid.isEmpty {
+                    targetApp = content.applications.first { $0.bundleIdentifier == bid }
+                    if targetApp == nil {
+                        DebugLog.write("AudioCapture: app \(bid) not running; falling back to whole-system capture")
+                    } else {
+                        DebugLog.write("AudioCapture: restricting capture to app \(bid)")
+                    }
+                }
+                self.startStream(for: display, including: targetApp)
             } catch {
                 DebugLog.write("AudioCapture SCShareableContent error: \(error.localizedDescription)")
                 await MainActor.run {
@@ -63,8 +85,21 @@ final class AudioCapture: NSObject, SCStreamDelegate {
         }
     }
 
-    private func startStream(for display: SCDisplay) {
-        let filter = SCContentFilter(display: display, excludingWindows: [])
+    private func startStream(for display: SCDisplay, including app: SCRunningApplication?) {
+        let filter: SCContentFilter
+        if let app {
+            // macOS 14+: a content filter restricted to specific running
+            // applications also restricts the audio stream to those apps.
+            // This is the per-app isolation path; no CATap involved so it
+            // works for self-signed bundles on Tahoe.
+            filter = SCContentFilter(
+                display: display,
+                including: [app],
+                exceptingWindows: []
+            )
+        } else {
+            filter = SCContentFilter(display: display, excludingWindows: [])
+        }
 
         let config = SCStreamConfiguration()
         config.capturesAudio = true
@@ -115,6 +150,40 @@ final class AudioCapture: NSObject, SCStreamDelegate {
     }
 
     // MARK: Device enumeration (used by menu picker)
+
+    /// Enumerates currently-running applications that are eligible for
+    /// per-app audio capture. Filters to apps with at least one on-screen
+    /// window (ScreenCaptureKit reports many background helpers that would
+    /// only clutter the picker). Returns (bundleID, display name) tuples,
+    /// sorted by name. Safe to call from the main thread.
+    static func enumerateRunningApplications() -> [(bundleID: String, name: String)] {
+        // SCShareableContent is async-only; bridge via a semaphore so the
+        // menu builder (synchronous) can call this directly.
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: [(bundleID: String, name: String)] = []
+        Task {
+            if let content = try? await SCShareableContent.current {
+                // Filter to .regular-activation-policy apps via
+                // NSRunningApplication; SCRunningApplication itself exposes
+                // no activation policy, and the raw list includes many
+                // background helpers (loginwindow, Spotlight, …) that
+                // would only clutter the picker.
+                let regularBundleIDs = Set(
+                    NSWorkspace.shared.runningApplications
+                        .filter { $0.activationPolicy == .regular }
+                        .map { $0.bundleIdentifier ?? "" }
+                )
+                for app in content.applications {
+                    guard regularBundleIDs.contains(app.bundleIdentifier) else { continue }
+                    let name = app.applicationName.isEmpty ? app.bundleIdentifier : app.applicationName
+                    result.append((bundleID: app.bundleIdentifier, name: name))
+                }
+            }
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + 2.0)
+        return result.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
 
     /// Enumerates output devices via CoreAudio for the menu picker. Returns
     /// (display name, device UID) tuples. Note: under SCStream the audio

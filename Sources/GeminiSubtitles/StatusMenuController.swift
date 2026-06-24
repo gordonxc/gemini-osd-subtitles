@@ -38,9 +38,13 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     /// (empty string = system default input).
     private let selectedMicSourceKey = "com.gemini-subtitles.selectedMicSource"
 
-    /// User-defaults key for the audio source kind ("system" or "mic").
+    /// User-defaults key for the audio source kind ("system", "app", or "mic").
     /// Defaults to "system" to preserve prior behavior.
     private let selectedSourceKindKey = "com.gemini-subtitles.audioSourceKind"
+
+    /// User-defaults key for the per-app capture target (bundle identifier).
+    /// Only consulted when `selectedSourceKindKey` == "app".
+    private let selectedAppSourceKey = "com.gemini-subtitles.selectedAppSource"
 
     /// User-defaults key for the OSD font size (points).
     private let selectedFontSizeKey = "com.gemini-subtitles.fontSize"
@@ -208,6 +212,10 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         // Refresh dynamic labels (Start/Stop title) every time the menu opens.
         refreshStartStopTitle()
+        // Rebuild so the Single App list reflects whatever's running right
+        // now (apps launched since the last menu build would otherwise be
+        // invisible until a state change triggers rebuildMenuInPlace).
+        rebuildMenuInPlace()
     }
 
     // MARK: Actions
@@ -240,6 +248,8 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         guard let uid = sender.representedObject as? String else { return }
         UserDefaults.standard.set(uid, forKey: selectedAudioSourceKey)
         UserDefaults.standard.set("system", forKey: selectedSourceKindKey)
+        // Clear per-app target so it doesn't leak into the new .system case.
+        UserDefaults.standard.removeObject(forKey: selectedAppSourceKey)
         rebuildMenuInPlace()
         restartPipelineIfRunning()
     }
@@ -248,6 +258,15 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         guard let uid = sender.representedObject as? String else { return }
         UserDefaults.standard.set(uid, forKey: selectedMicSourceKey)
         UserDefaults.standard.set("mic", forKey: selectedSourceKindKey)
+        UserDefaults.standard.removeObject(forKey: selectedAppSourceKey)
+        rebuildMenuInPlace()
+        restartPipelineIfRunning()
+    }
+
+    @objc private func selectAppSource(_ sender: NSMenuItem) {
+        guard let bundleID = sender.representedObject as? String else { return }
+        UserDefaults.standard.set(bundleID, forKey: selectedAppSourceKey)
+        UserDefaults.standard.set("app", forKey: selectedSourceKindKey)
         rebuildMenuInPlace()
         restartPipelineIfRunning()
     }
@@ -319,15 +338,17 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     /// Builds the two-level Audio Source ▸ submenu:
     ///   System Audio ▸ (System Default + output devices)
+    ///   Single App ▸ (currently-running apps with on-screen windows)
     ///   Microphone ▸ (System Default + input devices)
     /// Current selection is marked with a checkmark at the leaf level.
     private func buildAudioSourceSubmenu() {
         let parent: NSMenuItem
         let submenu = NSMenu()
+        let kind = selectedSourceKind()
 
         // --- System Audio sub-submenu ---
         let currentSysUID = selectedAudioSourceUID()
-        let isSysKind = selectedSourceKind() == "system"
+        let isSysKind = kind == "system"
         let systemParent = NSMenuItem(
             title: "System Audio", action: nil, keyEquivalent: "")
         let systemMenu = NSMenu()
@@ -358,9 +379,52 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         systemParent.submenu = systemMenu
         submenu.addItem(systemParent)
 
+        // --- Single App sub-submenu (per-app isolation) ---
+        let isAppKind = kind == "app"
+        let currentAppBid = selectedAppSourceBundleID()
+        let appParent = NSMenuItem(
+            title: "Single App", action: nil, keyEquivalent: "")
+        let appMenu = NSMenu()
+        let apps = AudioCapture.enumerateRunningApplications()
+        if apps.isEmpty {
+            // No eligible apps right now — show a disabled hint rather than
+            // an empty submenu so the affordance is discoverable.
+            let empty = NSMenuItem(
+                title: "No apps with audio playing",
+                action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            appMenu.addItem(empty)
+        } else {
+            for app in apps {
+                let item = NSMenuItem(
+                    title: app.name,
+                    action: #selector(selectAppSource(_:)),
+                    keyEquivalent: "")
+                item.target = self
+                item.representedObject = app.bundleID
+                item.state = (isAppKind && app.bundleID == currentAppBid) ? .on : .off
+                appMenu.addItem(item)
+            }
+            // If the user previously picked an app that is no longer
+            // running, surface it as a disabled "(not running)" entry so
+            // the current selection is still visible.
+            if isAppKind && !currentAppBid.isEmpty
+                && !apps.contains(where: { $0.bundleID == currentAppBid }) {
+                appMenu.addItem(.separator())
+                let stale = NSMenuItem(
+                    title: "\(currentAppBid) (not running)",
+                    action: nil, keyEquivalent: "")
+                stale.isEnabled = false
+                stale.state = .on
+                appMenu.addItem(stale)
+            }
+        }
+        appParent.submenu = appMenu
+        submenu.addItem(appParent)
+
         // --- Microphone sub-submenu ---
         let currentMicUID = selectedMicSourceUID()
-        let isMicKind = !isSysKind
+        let isMicKind = kind == "mic"
         let micParent = NSMenuItem(
             title: "Microphone", action: nil, keyEquivalent: "")
         let micMenu = NSMenu()
@@ -391,18 +455,24 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         micParent.submenu = micMenu
         submenu.addItem(micParent)
 
-        // Label the top-level item with the current kind + selected device.
+        // Label the top-level item with the current kind + selection.
         let topLabel: String = {
-            if isMicKind {
+            switch kind {
+            case "mic":
                 let micLabel = currentMicUID.isEmpty
                     ? "System Default"
                     : (inputs.first { $0.uid == currentMicUID }?.name ?? "Custom")
                 return "Audio Source: Microphone (\(micLabel))"
+            case "app":
+                let appLabel = apps.first { $0.bundleID == currentAppBid }?.name
+                    ?? currentAppBid
+                return "Audio Source: Single App (\(appLabel.isEmpty ? "none" : appLabel))"
+            default:
+                let sysLabel = currentSysUID.isEmpty
+                    ? "System Default"
+                    : (outputs.first { $0.uid == currentSysUID }?.name ?? "Custom")
+                return "Audio Source: System Audio (\(sysLabel))"
             }
-            let sysLabel = currentSysUID.isEmpty
-                ? "System Default"
-                : (outputs.first { $0.uid == currentSysUID }?.name ?? "Custom")
-            return "Audio Source: System Audio (\(sysLabel))"
         }()
         parent = NSMenuItem(title: topLabel, action: nil, keyEquivalent: "")
         parent.submenu = submenu
@@ -554,12 +624,18 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         UserDefaults.standard.string(forKey: selectedMicSourceKey) ?? ""
     }
 
-    /// Returns the currently-selected source kind ("system" / "mic").
+    /// Returns the currently-selected source kind ("system" / "app" / "mic").
     /// Defaults to "system".
     func selectedSourceKind() -> String {
         let stored = UserDefaults.standard.string(forKey: selectedSourceKindKey)
             ?? "system"
-        return stored == "mic" ? "mic" : "system"
+        // Only recognize known kinds; anything stale collapses to "system".
+        return (stored == "mic" || stored == "app") ? stored : "system"
+    }
+
+    /// Returns the stored per-app capture target bundle ID (empty = none).
+    func selectedAppSourceBundleID() -> String {
+        UserDefaults.standard.string(forKey: selectedAppSourceKey) ?? ""
     }
 
     /// Builds the `AppCoordinator.AudioSource` value for the current
@@ -569,6 +645,11 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         case "mic":
             let uid = selectedMicSourceUID()
             return .microphone(deviceUID: uid.isEmpty ? nil : uid)
+        case "app":
+            let bid = selectedAppSourceBundleID()
+            return .system(
+                audioSourceUID: nil,
+                applicationBundleID: bid.isEmpty ? nil : bid)
         default:
             let uid = selectedAudioSourceUID()
             return .system(audioSourceUID: uid.isEmpty ? nil : uid)

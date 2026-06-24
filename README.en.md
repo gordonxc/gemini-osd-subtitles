@@ -87,6 +87,27 @@ open GeminiSubtitles.app
 > unnotarized apps with no error. ScreenCaptureKit's **Screen Recording**
 > permission works reliably.
 
+### Per-app capture
+
+Under **Audio Source → Single App** you can restrict capture to one running
+application (Chrome, Spotify, QuickTime Player, …). Only that app's audio is
+sent to Gemini; everything else is filtered out at the ScreenCaptureKit layer
+via `SCContentFilter(display:including:exceptingWindows:)`. Use cases:
+
+- Translate a YouTube video without picking up notification sounds or music
+  playing in another app.
+- Isolate a video call's audio from system alerts.
+
+Notes:
+
+- The picker lists regular-policy apps with on-screen windows; it refreshes
+  each time the menu opens.
+- Selection persists by **bundle identifier** (PID would change between
+  launches). If the chosen app isn't running at Start time, capture falls
+  back to whole-system with a log line rather than failing.
+- Per-tab isolation isn't possible — browsers expose one audio stream per
+  process, not per tab.
+
 ### Status icon colours
 
 | Colour  | Meaning                                                  |
@@ -114,7 +135,7 @@ open GeminiSubtitles.app
 
 * **Start / Stop** — toggles the capture → Gemini → OSD pipeline.
 * **Target Language** — picker (curated, defaults to Cantonese).
-* **Audio Source** — system default or a specific output device.
+* **Audio Source** — system default, a specific output device, **a single application** (per-app isolation), or the microphone.
 * **Font Size** — 14–72 pt.
 * **Auto-stop** — Off / 5 / 15 / 30 / 60 min inactivity timeout.
 * **Unlock OSD to Move / Lock OSD** — toggle draggability.

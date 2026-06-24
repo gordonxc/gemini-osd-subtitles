@@ -62,6 +62,19 @@ open GeminiSubtitles.app
 
 > **macOS 26 Tahoe 注意：** 我哋用 ScreenCaptureKit 嘅音訊擷取而唔係 CoreAudio process tap（`AudioHardwareCreateProcessTap`）。Tahoe 上 CATap 對自簽／未公證嘅 app 會靜悄悄填零音訊 buffer 無任何 error。ScreenCaptureKit 嘅 **Screen Recording** 權限就正常運作。
 
+### Per-app capture（單一 app 擷取）
+
+喺 **Audio Source → Single App** 入面可以將擷取限制做單一運行緊嘅應用程式（Chrome、Spotify、QuickTime Player……）。淨係嗰個 app 嘅音訊會傳去 Gemini，其他全部喺 ScreenCaptureKit layer 用 `SCContentFilter(display:including:exceptingWindows:)` 過濾走。用例：
+
+- 翻譯 YouTube 影片但唔想收入通知聲或者另一個 app 嘅音樂。
+- 將視像會議嘅音訊同系統提示聲隔開。
+
+注意事項：
+
+- Picker 列出有 on-screen window 嘅 regular-policy app；每次打開 menu 都會刷新。
+- 選擇用 **bundle identifier** 持久化（PID 每次開都變）。如果揀咗嘅 app 啟動嗰陣冇 running，capture 會退返去 whole-system 並 log 一行，唔會硬性 fail。
+- 無法 per-tab 隔離 —— 瀏覽器每個 process 淨係出一條音訊 stream，唔係每個 tab 一條。
+
 ### 狀態 icon 顏色
 
 | 顏色  | 意思                                                  |
@@ -84,7 +97,7 @@ open GeminiSubtitles.app
 
 * **Start / Stop** —— 切換 capture → Gemini → OSD pipeline。
 * **Target Language** —— picker（精選，預設廣東話）。
-* **Audio Source** —— 系統預設或者指定輸出裝置。
+* **Audio Source** —— 系統預設、指定輸出裝置、**單一應用程式**（per-app 隔離），或者 mic。
 * **Font Size** —— 14–72 pt。
 * **Auto-stop** —— Off / 5 / 15 / 30 / 60 分鐘閒置 timeout。
 * **Unlock OSD to Move / Lock OSD** —— 切換可拖性。

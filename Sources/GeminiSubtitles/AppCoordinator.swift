@@ -34,7 +34,9 @@ final class AppCoordinator {
         /// System audio via ScreenCaptureKit. `uid` selects a specific
         /// output device for the menu picker (currently advisory under
         /// SCStream — capture always uses the main display's audio).
-        case system(audioSourceUID: String?)
+        /// `appBundleID`, when non-nil, restricts capture to that single
+        /// running application via SCContentFilter(display:including:).
+        case system(audioSourceUID: String?, applicationBundleID: String? = nil)
         /// Microphone via AVAudioEngine. `uid` of nil/empty = system
         /// default input device.
         case microphone(deviceUID: String?)
@@ -213,9 +215,10 @@ final class AppCoordinator {
 
         // Build the appropriate audio capture + pipeline.
         switch audioSource {
-        case .system(let uid):
+        case .system(let uid, let appBundleID):
             let audioCapture = AudioCapture()
             audioCapture.deviceUID = (uid?.isEmpty == false) ? uid : nil
+            audioCapture.applicationBundleID = (appBundleID?.isEmpty == false) ? appBundleID : nil
             audioCapture.onError = { [weak self] error in
                 self?.handleAudioError(error)
             }
