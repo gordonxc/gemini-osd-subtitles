@@ -13,7 +13,29 @@
         <link>https://github.com/gordonxc/gemini-osd-subtitles</link>
         <description>Release feed for Gemini Subtitles</description>
         <language>en</language>
-                <item>
+                        <item>
+            <title>Version 0.9.1</title>
+            <pubDate>Wed, 24 Jun 2026 20:38:07 +0100</pubDate>
+            <sparkle:version>0.9.1</sparkle:version>
+            <sparkle:edSignature>wSDurtSmlWxZBzsTR8jia/h+tpAw4VHUwTqrJtDHe3OyB+zv9493oLCBCjahd8jkGJ3JbYcyICS4s+axPPHtAw==</sparkle:edSignature>
+            <description><![CDATA[Bug fixes for the 0.9.0 OSD length-cap work.
+
+macOS:
+- Drag clamp no longer fires mid-drag (was using a nonexistent notification; now uses a leftMouseUp monitor)
+- Line-count math correct (was underestimating line height, causing premature head-truncation)
+- Font-size changes no longer leave stale overflow or ellipsization
+- Resize clamps the frame to the screen so large fonts can't push the OSD off the top
+
+Android:
+- Line budget now accounts for system font-scale (Accessibility → Font size)
+- Defensive geometry recompute on text update catches display changes that skip onConfigurationChanged (external-display attach in background, foldable unfold)]]></description>
+            <enclosure
+                url="https://github.com/gordonxc/gemini-osd-subtitles/releases/download/v0.9.1/GeminiSubtitles-v0.9.1.zip"
+                sparkle:edSignature="wSDurtSmlWxZBzsTR8jia/h+tpAw4VHUwTqrJtDHe3OyB+zv9493oLCBCjahd8jkGJ3JbYcyICS4s+axPPHtAw=="
+                length="1268040"
+                type="application/octet-stream" />
+        </item>
+        <item>
             <title>Version 0.9.0</title>
             <pubDate>Wed, 24 Jun 2026 20:14:15 +0100</pubDate>
             <sparkle:version>0.9.0</sparkle:version>
