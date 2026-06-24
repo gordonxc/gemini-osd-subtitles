@@ -162,19 +162,23 @@ NEW_ITEM="$(cat <<EOF
 EOF
 )"
 
-# Insert the new <item> right after the opening <channel> tag so the newest
-# release is always first.
+# Insert the new <item> right before the first existing <item> (so newest
+# release is always first AND channel metadata stays above the items). If no
+# <item> exists yet, insert before </channel>.
 python3 - "$APPCAST" "$NEW_ITEM" <<'PY'
-import sys
+import re, sys
 path, item = sys.argv[1], sys.argv[2]
 with open(path, "r", encoding="utf-8") as f:
     xml = f.read()
-needle = "<channel>"
-idx = xml.find(needle)
-if idx < 0:
-    raise SystemExit("appcast <channel> tag not found")
-idx += len(needle)
-xml = xml[:idx] + "\n" + item + xml[idx:]
+m = re.search(r'<item>', xml)
+if m:
+    idx = m.start()
+else:
+    m = re.search(r'</channel>', xml)
+    if not m:
+        raise SystemExit("appcast has neither <item> nor </channel>")
+    idx = m.start()
+xml = xml[:idx] + item + "\n        " + xml[idx:]
 with open(path, "w", encoding="utf-8") as f:
     f.write(xml)
 PY
