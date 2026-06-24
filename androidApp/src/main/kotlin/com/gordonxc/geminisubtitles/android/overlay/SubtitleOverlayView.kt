@@ -57,7 +57,7 @@ class SubtitleOverlayView(
     /** Total horizontal margin (both sides). Matches Material Design edge spacing. */
     private val widthMarginDp = 48
     /** Hard ceiling on OSD width — past this, lines are hard to scan. */
-    private val widthCeilingPt = 1200
+    private val widthCeilingDp = 1200
     /** Vertical offset of the OSD's bottom edge above the screen bottom. */
     private val bottomOffsetPx = 100
     /** Top margin — OSD must not kiss the status bar / notch. */
@@ -68,6 +68,14 @@ class SubtitleOverlayView(
     private val density: Float get() = context.resources.displayMetrics.density
     private val screenWidthPx: Int get() = context.resources.displayMetrics.widthPixels
     private val screenHeightPx: Int get() = context.resources.displayMetrics.heightPixels
+
+    /**
+     * Last-seen screen geometry, used to detect external-display / fold
+     * changes that fire no `onConfigurationChanged` (e.g. external display
+     * attach while the app is in background). Checked on every `updateText`.
+     */
+    private var lastScreenWidthPx: Int = screenWidthPx
+    private var lastScreenHeightPx: Int = screenHeightPx
 
     override fun reveal() {
         handler.post {
@@ -129,6 +137,23 @@ class SubtitleOverlayView(
 
     override fun updateText(text: String) {
         handler.post {
+            // Defensive geometry recompute (#21): some screen-geometry
+            // changes (external display attach in background, foldable
+            // unfold) don't fire onConfigurationChanged. Detect by polling
+            // display metrics on every text update; cheap, and avoids stale
+            // line budgets / window widths across configuration changes.
+            if (screenWidthPx != lastScreenWidthPx ||
+                screenHeightPx != lastScreenHeightPx) {
+                lastScreenWidthPx = screenWidthPx
+                lastScreenHeightPx = screenHeightPx
+                layoutParams?.let { params ->
+                    params.width = computeWindowWidth()
+                    overlayView?.let { v ->
+                        v.maxLines = computeMaxLines(fontSize)
+                        try { windowManager.updateViewLayout(v, params) } catch (_: Exception) {}
+                    }
+                }
+            }
             overlayView?.let { v ->
                 v.text = text
                 v.alpha = 1f
@@ -157,6 +182,10 @@ class SubtitleOverlayView(
      */
     fun onConfigurationChanged(newConfig: Configuration) {
         handler.post {
+            // Sync the last-seen cache so updateText's defensive check
+            // doesn't immediately re-fire and double-apply this update.
+            lastScreenWidthPx = screenWidthPx
+            lastScreenHeightPx = screenHeightPx
             layoutParams?.let { params ->
                 params.width = computeWindowWidth()
                 overlayView?.let { v ->
@@ -171,11 +200,11 @@ class SubtitleOverlayView(
 
     /**
      * Computes the OSD window width in px: `screenWidth − 2×48dp`, capped at
-     * 1200pt (≈ 1200px on mdpi, scaled by density). Design Q5.
+     * 1200dp (scaled by density). Design Q5.
      */
     private fun computeWindowWidth(): Int {
         val marginPx = (widthMarginDp * density).toInt()
-        val ceilingPx = (widthCeilingPt * density).toInt()
+        val ceilingPx = (widthCeilingDp * density).toInt()
         val fromScreen = screenWidthPx - 2 * marginPx
         return minOf(fromScreen, ceilingPx).coerceAtLeast(0)
     }
@@ -184,11 +213,16 @@ class SubtitleOverlayView(
      * Computes the dynamic line budget (design Q6). At most
      * [absoluteMaxLines]; fewer when the screen is short relative to the font
      * size so the OSD never overflows the top of the screen.
+     *
+     * Line height uses sp → px conversion via `fontScale * density` so that
+     * the system font-size setting (Accessibility → Font size) is accounted
+     * for — without this, a user with a large font scale gets an overcounted
+     * budget and the OSD overflows the top of the screen.
      */
     private fun computeMaxLines(fontSizeSp: Float): Int {
-        // Estimate line height in px: font (sp → px) × 1.4 line-height factor.
         val lineSpacingFactor = 1.4f
-        val fontPx = fontSizeSp * density
+        val fontScale = context.resources.configuration.fontScale
+        val fontPx = fontSizeSp * density * fontScale
         val lineHeightPx = fontPx * lineSpacingFactor
         if (lineHeightPx <= 0f) return 1
 

@@ -8,6 +8,13 @@ final class SubtitleWindow: NSPanel {
     private let fadeDelay: TimeInterval = 4.0
     private var fadeTimer: Timer?
 
+    /// Local monitor for left-mouse-up events; used to detect drag end.
+    /// `NSWindow` has `didEndLiveResizeNotification` but no equivalent for
+    /// move, and `didMoveNotification` fires per-frame during a drag (which
+    /// would fight the cursor if we clamped there). Mouse-up is the only
+    /// reliable "drag is over" signal.
+    private var mouseUpMonitor: Any?
+
     /// When true (default), the OSD is click-through so it never blocks the
     /// app underneath. When false, the window captures mouse events so the
     /// user can drag it via `isMovableByWindowBackground`.
@@ -70,9 +77,18 @@ final class SubtitleWindow: NSPanel {
 
         // Drag clamp (design Q7): when the user finishes dragging, snap the
         // frame back inside the visible frame if any edge is off-screen.
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(windowDidMove(_:)),
-            name: NSWindow.didMoveNotification, object: self)
+        // NSWindow has didEndLiveResizeNotification but no equivalent for
+        // move; didMoveNotification fires per-frame during the drag and would
+        // fight the cursor if we clamped there. A local mouse-up monitor is
+        // the only reliable "drag is over" signal.
+        mouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] event in
+            // Only clamp when the event is destined for this window — the
+            // monitor fires for every left-mouse-up in the app.
+            if event.window === self {
+                self?.clampFrameToScreen(animated: true)
+            }
+            return event
+        }
         // Recompute geometry if the display layout changes (external display
         // attach/detach, resolution change, menu bar height change).
         NotificationCenter.default.addObserver(
@@ -82,6 +98,9 @@ final class SubtitleWindow: NSPanel {
 
     deinit {
         NotificationCenter.default.removeObserver(self)
+        if let monitor = mouseUpMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
     }
 
     var subtitleView: SubtitleViewController? {
@@ -206,6 +225,11 @@ final class SubtitleWindow: NSPanel {
         // use the same budget as the window geometry.
         subtitleView?.applyLineCaps(
             translation: translationMaxLines, original: originalMaxLines)
+
+        // Clamp in case the new (taller) frame extends past the top of the
+        // visible frame — e.g. when the user previously dragged the OSD up
+        // and then cranked the font size. Matches screenParametersChanged.
+        clampFrameToScreen(animated: false)
     }
 
     private func fadeOut() {
@@ -227,10 +251,6 @@ final class SubtitleWindow: NSPanel {
     }
 
     // MARK: Drag clamp (design Q7)
-
-    @objc private func windowDidMove(_ note: Notification) {
-        clampFrameToScreen(animated: true)
-    }
 
     @objc private func screenParametersChanged(_ note: Notification) {
         // Display layout changed — recompute the line budget for the current

@@ -108,11 +108,20 @@ final class SubtitleViewController: NSViewController {
     }
 
     /// Apply a new font size to the subtitle text. The original line scales
-    /// proportionally.
+    /// proportionally. Re-runs head-truncation on the current values so the
+    /// display isn't left with stale ellipsization (or stale overflow) until
+    /// the next subtitle arrives.
     func applyFontSize(_ size: CGFloat) {
         currentFontSize = size
         textField.font = NSFont.systemFont(ofSize: size, weight: .medium)
         originalField.font = NSFont.systemFont(ofSize: size * originalSizeRatio, weight: .medium)
+        // Re-truncate against the new metrics. Without this, a font *increase*
+        // could leave overflowing text on screen, and a *decrease* could
+        // leave a needless leading ellipsis.
+        textField.stringValue = headTruncate(textField.stringValue, for: textField)
+        if !originalField.isHidden {
+            originalField.stringValue = headTruncate(originalField.stringValue, for: originalField)
+        }
     }
 
     /// Push new line caps from the window. Called whenever the geometry
@@ -174,7 +183,10 @@ final class SubtitleViewController: NSViewController {
             with: NSSize(width: width, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: attributes)
-        let lineHeight = font.boundingRectForFont.height
+        // Use NSTextField's actual laid-out line height (ascender − descender
+        // + leading) rather than `boundingRectForFont.height`, which omits
+        // leading and would cause us to over-count lines and truncate early.
+        let lineHeight = font.ascender - font.descender + font.leading
         guard lineHeight > 0 else { return 1 }
         return max(1, Int(ceil(rect.height / lineHeight)))
     }
