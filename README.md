@@ -8,7 +8,7 @@
 
 | 平台    | 路徑        | 狀態 |
 |---------|-------------|------|
-| macOS   | `Sources/` (Swift) | 推出中 — adhoc 簽署嘅 release build |
+| macOS   | `Sources/` (Swift) | 推出中 — 用穩定自簽憑證簽署嘅 release build，內建 Sparkle 自動更新 |
 | Android | `shared/` + `androidApp/` (Kotlin Multiplatform) | Debug build 可用 |
 
 ---
@@ -46,7 +46,7 @@ Binary 會喺 `.build/release/GeminiSubtitles`。
 ./run.sh
 ```
 
-第一次要用 right-click → **Open** 開（因為 bundle 係 adhoc 簽署，Gatekeeper 會彈警告）。要清除隔離 flag：
+第一次要用 right-click → **Open** 開（因為 bundle 用自簽憑證而唔係 Apple Developer ID，Gatekeeper 會彈警告）。要清除隔離 flag：
 
 ```sh
 xattr -dr com.apple.quarantine GeminiSubtitles.app
@@ -60,7 +60,7 @@ open GeminiSubtitles.app
 3. 撳 **Start**。第一次會跳去 **System Settings → Privacy & Security → Screen Recording** —— 開啟 **Gemini Subtitles**，然後 quit 再重開。
 4. 播任何音訊。1–3 秒內就會見到翻譯字幕。狀態 icon 會由綠色轉做 **藍色**（偵測到非零音訊 frame），靜音 3 秒後轉返綠色。
 
-> **macOS 26 Tahoe 注意：** 我哋用 ScreenCaptureKit 嘅音訊擷取而唔係 CoreAudio process tap（`AudioHardwareCreateProcessTap`）。Tahoe 上 CATap 對 adhoc 簽署嘅 app 會靜悄悄填零音訊 buffer 無任何 error。ScreenCaptureKit 嘅 **Screen Recording** 權限對 adhoc 簽署就正常運作。
+> **macOS 26 Tahoe 注意：** 我哋用 ScreenCaptureKit 嘅音訊擷取而唔係 CoreAudio process tap（`AudioHardwareCreateProcessTap`）。Tahoe 上 CATap 對自簽／未公證嘅 app 會靜悄悄填零音訊 buffer 無任何 error。ScreenCaptureKit 嘅 **Screen Recording** 權限就正常運作。
 
 ### 狀態 icon 顏色
 
@@ -89,6 +89,7 @@ open GeminiSubtitles.app
 * **Auto-stop** —— Off / 5 / 15 / 30 / 60 分鐘閒置 timeout。
 * **Unlock OSD to Move / Lock OSD** —— 切換可拖性。
 * **Set API Key…** —— modal 輸入，key 儲喺 Keychain。
+* **Check for Updates…** —— 經 Sparkle 檢查 `appcast.xml` 有冇新版本（launch 時都會自動檢查一次）。
 * **Quit**
 
 ### 架構（macOS）
@@ -123,6 +124,38 @@ ScreenCaptureKit ──Float32 PCM──▶ AudioPipeline ──base64 Int16 PCM
 | `NotificationManager`         | `UNUserNotificationCenter` for critical errors                  |
 | `DebugLog`                    | File logger（`~/Library/Logs/GeminiSubtitles.log`）繞過 unified-log privacy masking |
 | `AppCoordinator`              | 統籌 capture ↔ Gemini ↔ OSD；將狀態 map 去 icon/menu   |
+
+### 自動更新（Sparkle 2）
+
+macOS app 內建 [Sparkle 2](https://github.com/sparkle-project/Sparkle) 做 in-app 自動更新。運作方式：
+
+* App 啟動嗰陣會自動 fetch 一次 `appcast.xml`（單次檢查，唔會背景定期 poll）。
+* 亦可以隨時撳 menu bar → **Check for Updates…** 手動檢查。
+* 有新版本就會彈出 Sparkle 嘅標準更新視窗，確認後會下載、驗證 EdDSA 簽名、取代 `.app` bundle 再 relaunch。
+* 更新封存（zip）用 EdDSA 簽名（獨立於 code-signing 憑證），所以即使個 bundle 用自簽憑證，Sparkle 都可以驗證更新檔無被竄改。
+* **安裝位置限制：** 如果個 app 放喺 `~/Applications`、`~/Downloads` 等可寫位置，Sparkle 可以無需密碼直接替換。如果放喺 `/Applications`（system-wide），Sparkle 會彈 admin 密碼 prompt。
+
+Feed URL（`Info.plist` 嘅 `SUFeedURL`）：
+
+```
+https://raw.githubusercontent.com/gordonxc/gemini-osd-subtitles/main/appcast.xml
+```
+
+#### 發佈新版本
+
+1. 改 `Sources/GeminiSubtitles/Assets/Info.plist` 嘅 `CFBundleShortVersionString` 去新版本（例如 `0.7.0`）。
+2. 確保你已經有 Sparkle 嘅 EdDSA keypair（只需做一次）：
+   ```sh
+   .build/artifacts/sparkle/Sparkle/bin/generate_keys
+   ```
+   `generate_keys` 會印出公鑰 —— 貼去 `Info.plist` 嘅 `SUPublicEDKey`。私鑰儲喺你嘅 login Keychain（唔會寫落 disk）；要喺另一部機發佈就用 `generate_keys -x <file>` 匯出。
+3. 跑：
+   ```sh
+   ./publish-release.sh 0.7.0 "Release notes..."
+   ```
+   Script 會：build release → `ditto` 打 zip → `sign_update` EdDSA 簽 → `gh release create` 上傳去 GitHub Releases → 更新 `appcast.xml` → commit + push。
+
+`appcast.xml` 係 source-of-truth，每次發佈都會喺 repo 入面更新；用戶端嘅 app 會由 raw GitHub URL 讀取。
 
 ### 除錯（macOS）
 

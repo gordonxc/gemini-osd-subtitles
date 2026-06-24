@@ -20,25 +20,40 @@ case "$MODE" in
   release)
     echo ">> Building (release)…"
     swift build -c release
-    BIN=".build/release/${APP_NAME}"
+    BUILD_BIN_PATH="$(swift build -c release --show-bin-path)"
     ;;
   debug|run)
     echo ">> Building (debug)…"
     swift build
-    BIN=".build/debug/${APP_NAME}"
+    BUILD_BIN_PATH="$(swift build --show-bin-path)"
     ;;
   *)
     echo "Unknown mode: $MODE (use: debug | release | run)"
     exit 1
     ;;
 esac
+BIN="${BUILD_BIN_PATH}/${APP_NAME}"
 
 echo ">> Packaging ${APP_BUNDLE}…"
 rm -rf "$APP_BUNDLE"
 mkdir -p "${APP_BUNDLE}/Contents/MacOS"
 mkdir -p "${APP_BUNDLE}/Contents/Resources"
+mkdir -p "${APP_BUNDLE}/Contents/Frameworks"
 cp "$BIN" "${APP_BUNDLE}/Contents/MacOS/"
 cp "Sources/GeminiSubtitles/Assets/Info.plist" "${APP_BUNDLE}/Contents/"
+
+# Embed Sparkle.framework. SPM unpacks the binary xcframework next to the
+# executable inside the build bin path, so resolve the right copy from
+# `swift build --show-bin-path` rather than hardcoding the arch directory.
+SPARKLE_FRAMEWORK="${BUILD_BIN_PATH}/Sparkle.framework"
+if [[ -d "$SPARKLE_FRAMEWORK" ]]; then
+  echo ">> Embedding Sparkle.framework"
+  cp -R "$SPARKLE_FRAMEWORK" "${APP_BUNDLE}/Contents/Frameworks/"
+else
+  echo "!! Sparkle.framework not found at ${SPARKLE_FRAMEWORK}." >&2
+  echo "!! Run 'swift package resolve' and rebuild." >&2
+  exit 1
+fi
 
 # Re-sign the bundle with a stable code-signing identity so TCC permissions
 # (Screen Recording / System Audio Recording) persist across rebuilds.

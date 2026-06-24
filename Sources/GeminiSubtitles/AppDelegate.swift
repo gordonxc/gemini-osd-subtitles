@@ -1,18 +1,35 @@
 import AppKit
+import Sparkle
 
 /// Owns the lifecycle of the menu bar app: the status item, the dropdown menu
-/// controller, and the coordinator that wires audio → Gemini → OSD.
+/// controller, the coordinator that wires audio → Gemini → OSD, and the
+/// Sparkle updater controller.
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem!
     private var menuController: StatusMenuController!
     private let coordinator = AppCoordinator()
 
+    /// Sparkle updater. Held strongly so it survives for the app lifetime —
+    /// if this is released, the launch-time update check never fires and the
+    /// "Check for Updates…" menu item stops working. Because
+    /// SUEnableAutomaticUpdates=false, starting it triggers a single feed
+    /// fetch on launch instead of periodic background polling.
+    private var updaterController: SPUStandardUpdaterController!
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         configureStatusIcon(state: .stopped)
 
-        menuController = StatusMenuController(coordinator: coordinator, statusItem: statusItem)
+        updaterController = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: nil,
+            userDriverDelegate: nil)
+
+        menuController = StatusMenuController(
+            coordinator: coordinator,
+            statusItem: statusItem,
+            updaterController: updaterController)
         statusItem.menu = menuController.buildMenu()
 
         coordinator.delegate = self

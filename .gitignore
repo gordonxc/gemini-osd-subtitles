@@ -6,6 +6,8 @@ Package.resolved
 GeminiSubtitles.app/
 *.app.zip
 GeminiSubtitles.app.zip
+# Version-tagged release zips produced by publish-release.sh
+GeminiSubtitles-v*.zip
 
 # Kotlin / Android / Gradle
 *.iml

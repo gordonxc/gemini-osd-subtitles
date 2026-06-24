@@ -1,4 +1,5 @@
 import AppKit
+import Sparkle
 
 /// Builds and updates the menu bar dropdown. Owns language selection state
 /// (persisted to UserDefaults) and the API-key entry alert.
@@ -6,6 +7,9 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     private weak var coordinator: AppCoordinator?
     private weak var statusItem: NSStatusItem?
+
+    /// Sparkle updater; "Check for Updates…" invokes `checkForUpdates(_:)`.
+    private weak var updaterController: SPUStandardUpdaterController?
 
     /// Top status line shown in the dropdown ("Stopped", "Running", last error…).
     private let statusLine = NSMenuItem(title: "Stopped", action: nil, keyEquivalent: "")
@@ -55,9 +59,12 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     /// Available auto-stop inactivity timeouts in minutes (0 = off).
     static let autoStopOptions: [Int] = [0, 5, 15, 30, 60]
 
-    init(coordinator: AppCoordinator, statusItem: NSStatusItem) {
+    init(coordinator: AppCoordinator,
+         statusItem: NSStatusItem,
+         updaterController: SPUStandardUpdaterController? = nil) {
         self.coordinator = coordinator
         self.statusItem = statusItem
+        self.updaterController = updaterController
         super.init()
     }
 
@@ -157,6 +164,16 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         let apiKey = NSMenuItem(title: "Set API Key…", action: #selector(presentAPIKeyAlert), keyEquivalent: "")
         apiKey.target = self
         menu.addItem(apiKey)
+
+        // "Check for Updates…" → Sparkle's standard update window. Disabled
+        // when no updater is wired in (defensive; should always be present).
+        let checkUpdates = NSMenuItem(
+            title: "Check for Updates…",
+            action: #selector(checkForUpdates),
+            keyEquivalent: "")
+        checkUpdates.target = self
+        checkUpdates.isEnabled = (updaterController != nil)
+        menu.addItem(checkUpdates)
 
         let quit = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
@@ -290,6 +307,12 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     @objc private func quit() {
         coordinator?.stop(reason: .userRequested)
         NSApp.terminate(nil)
+    }
+
+    /// Manual update check — opens Sparkle's standard update window if a
+    /// newer version is found on the appcast feed.
+    @objc private func checkForUpdates() {
+        updaterController?.checkForUpdates(nil)
     }
 
     // MARK: Audio Source submenu

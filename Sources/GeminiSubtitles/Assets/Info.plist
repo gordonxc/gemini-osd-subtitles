@@ -9,7 +9,7 @@
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.6.0</string>
+    <string>0.7.0</string>
     <key>CFBundleExecutable</key>
     <string>GeminiSubtitles</string>
     <key>CFBundlePackageType</key>
@@ -26,5 +26,26 @@
     <string>Gemini Subtitles captures system audio to translate it into on-screen subtitles.</string>
     <key>NSScreenCaptureDescription</key>
     <string>Gemini Subtitles uses screen capture (audio-only) to capture system audio for live translation subtitles.</string>
+    <!-- Sparkle 2 — in-app self-update. -->
+    <key>SUFeedURL</key>
+    <string>https://raw.githubusercontent.com/gordonxc/gemini-osd-subtitles/main/appcast.xml</string>
+    <!-- EdDSA public key used to verify update archives. The matching
+         private key lives in the macOS Keychain (created by
+         `Sparkle.framework/Resources/generate_keys`). -->
+    <key>SUPublicEDKey</key>
+    <string>EixeW10FR+1YeNEauPqucGKUClazBKZ9zU/fqfdx3OE=</string>
+    <!-- Single launch-time check only — no background polling. The user
+         drives checks on demand via "Check for Updates…". -->
+    <key>SUEnableAutomaticUpdates</key>
+    <false/>
+    <key>SUAutomaticallyUpdate</key>
+    <false/>
+    <key>SUAllowsAutomaticUpdates</key>
+    <false/>
+    <!-- Required by Sparkle 2 for the XPC installer launcher service. -->
+    <key>SUEnableInstallerLauncherService</key>
+    <true/>
+    <key>SUShowReleaseNotes</key>
+    <true/>
 </dict>
 </plist>

@@ -9,7 +9,7 @@ Two native ports share this repo:
 
 | Platform | Path        | Status |
 |----------|-------------|--------|
-| macOS    | `Sources/` (Swift) | Shipping — adhoc-signed release builds |
+| macOS    | `Sources/` (Swift) | Shipping — release builds signed with a stable self-signed cert, with built-in Sparkle auto-update |
 | Android  | `shared/` + `androidApp/` (Kotlin Multiplatform) | Working debug builds |
 
 ---
@@ -60,8 +60,8 @@ identity:
 ```
 
 Launch with right-click → **Open** the first time (Gatekeeper will warn
-because the bundle is adhoc-signed). To clear the quarantine flag on your own
-machine:
+because the bundle is self-signed rather than Apple Developer ID-signed). To
+clear the quarantine flag on your own machine:
 
 ```sh
 xattr -dr com.apple.quarantine GeminiSubtitles.app
@@ -83,9 +83,9 @@ open GeminiSubtitles.app
 
 > **macOS 26 Tahoe note:** we use ScreenCaptureKit's audio capture rather
 > than the CoreAudio process tap (`AudioHardwareCreateProcessTap`). On Tahoe
-> the CATap path silently zero-fills audio buffers for adhoc-signed apps
-> with no error. ScreenCaptureKit's **Screen Recording** permission works
-> reliably for adhoc signatures.
+> the CATap path silently zero-fills audio buffers for self-signed /
+> unnotarized apps with no error. ScreenCaptureKit's **Screen Recording**
+> permission works reliably.
 
 ### Status icon colours
 
@@ -119,6 +119,7 @@ open GeminiSubtitles.app
 * **Auto-stop** — Off / 5 / 15 / 30 / 60 min inactivity timeout.
 * **Unlock OSD to Move / Lock OSD** — toggle draggability.
 * **Set API Key…** — modal prompt storing the key in Keychain.
+* **Check for Updates…** — manually invokes Sparkle's update check against `appcast.xml` (also checked once at launch).
 * **Quit**
 
 ### Architecture (macOS)
@@ -153,6 +154,56 @@ ScreenCaptureKit ──Float32 PCM──▶ AudioPipeline ──base64 Int16 PCM
 | `NotificationManager`         | `UNUserNotificationCenter` for critical errors                  |
 | `DebugLog`                    | File logger (`~/Library/Logs/GeminiSubtitles.log`) bypassing unified-log privacy masking |
 | `AppCoordinator`              | Orchestrates capture ↔ Gemini ↔ OSD; maps status to icon/menu   |
+
+### Auto-update (Sparkle 2)
+
+The macOS app ships with [Sparkle 2](https://github.com/sparkle-project/Sparkle)
+for in-app self-update. How it works:
+
+* On launch, the app fetches `appcast.xml` once (single check — no background
+  polling).
+* You can also trigger a manual check at any time via menu bar →
+  **Check for Updates…**.
+* When a newer version is found, Sparkle shows its standard update window;
+  confirming downloads the archive, verifies its EdDSA signature, replaces
+  the `.app` bundle in place, and relaunches.
+* The update archive is EdDSA-signed independently of the code-signing
+  certificate, so Sparkle can verify tamper-resistance even though the bundle
+  itself is self-signed.
+* **Install-location caveat:** Sparkle can replace the bundle without
+  elevation when it lives in a user-writable location (`~/Applications`,
+  `~/Downloads`, …). If installed under `/Applications`, Sparkle will prompt
+  for an admin password.
+
+Feed URL (from `SUFeedURL` in `Info.plist`):
+
+```
+https://raw.githubusercontent.com/gordonxc/gemini-osd-subtitles/main/appcast.xml
+```
+
+#### Publishing a new release
+
+1. Bump `CFBundleShortVersionString` in
+   `Sources/GeminiSubtitles/Assets/Info.plist` to the new version (e.g.
+   `0.7.0`).
+2. Make sure you have a Sparkle EdDSA keypair (one-time setup):
+   ```sh
+   .build/artifacts/sparkle/Sparkle/bin/generate_keys
+   ```
+   `generate_keys` prints the public key — paste it into Info.plist's
+   `SUPublicEDKey`. The private key is stored in your login Keychain
+   (never written to disk); to publish from another machine, export it
+   with `generate_keys -x <file>` and import there with `-f`.
+3. Run:
+   ```sh
+   ./publish-release.sh 0.7.0 "Release notes..."
+   ```
+   The script: builds the release → `ditto`-zips the `.app` → EdDSA-signs
+   it via `sign_update` → `gh release create` uploads it to GitHub Releases
+   → regenerates `appcast.xml` → commits & pushes.
+
+`appcast.xml` is the source of truth and is updated in the repo on every
+release; client apps read it via the raw GitHub URL above.
 
 ### Debugging (macOS)
 
