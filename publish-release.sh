@@ -170,14 +170,22 @@ import re, sys
 path, item = sys.argv[1], sys.argv[2]
 with open(path, "r", encoding="utf-8") as f:
     xml = f.read()
-m = re.search(r'<item>', xml)
+# Search for <item> ONLY after the last XML comment close, so we don't
+# match the literal "<item>" tokens inside the header comment (e.g. the
+# feed documentation says 'Each <item> is one release'). Without this,
+# the new entry gets spliced into the comment and Sparkle never sees it.
+search_start = 0
+last_comment_end = xml.rfind("-->")
+if last_comment_end != -1:
+    search_start = last_comment_end + 3
+m = re.search(r'<item>', xml[search_start:])
 if m:
-    idx = m.start()
+    idx = search_start + m.start()
 else:
-    m = re.search(r'</channel>', xml)
+    m = re.search(r'</channel>', xml[search_start:])
     if not m:
         raise SystemExit("appcast has neither <item> nor </channel>")
-    idx = m.start()
+    idx = search_start + m.start()
 xml = xml[:idx] + item + "\n        " + xml[idx:]
 with open(path, "w", encoding="utf-8") as f:
     f.write(xml)
