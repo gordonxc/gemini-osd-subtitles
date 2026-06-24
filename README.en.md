@@ -1,382 +1,156 @@
 # Gemini Subtitles
 
-Real-time on-screen subtitles for any audio playing on your device, powered by
-the **Gemini Live `gemini-3.5-live-translate-preview`** model. Captures system
-audio, streams it to Gemini, and renders translated text as a floating,
-click-through overlay.
+Real-time, AI-powered on-screen subtitles for any audio playing on your
+device. Captures system audio or microphone input, streams it to Gemini Live,
+and renders the translated text as a floating, click-through, draggable
+overlay. Great for watching videos, attending meetings, or learning languages.
 
-Two native ports share this repo:
-
-| Platform | Path        | Status |
-|----------|-------------|--------|
-| macOS    | `Sources/` (Swift) | Shipping — release builds signed with a stable self-signed cert, with built-in Sparkle auto-update |
-| Android  | `shared/` + `androidApp/` (Kotlin Multiplatform) | Working debug builds |
+Powered by the **Gemini Live `gemini-3.5-live-translate-preview`** model. You
+will need a Gemini API key with access to this model.
 
 ---
 
-## macOS app
+## Features
 
-A menu-bar utility (`LSUIElement = true`, no Dock icon). System-wide audio
-capture via ScreenCaptureKit; floating OSD via `NSPanel`.
+### Subtitles & translation
+- **Real-time translation** — 20+ target languages (defaults to Cantonese `yue`). Gemini accepts base ISO 639 codes (`yue`, `zh`, `en`, `ja`, `ko`, …)
+- **Punctuation-aware splitting** — incoming fragments are split on CJK / Latin punctuation or 1.5 s speech pauses; up to 2 sentences visible at once
+- **Bilingual OSD** (macOS) — source-language line displayed alongside the translation, great for language learners
+- **OSD length cap** — long sentences wrap to up to 4 lines and head-truncate (`…most recent text`); the OSD never overflows the screen
 
-* **Zero third-party dependencies** — built entirely on Apple frameworks
-  (AppKit, ScreenCaptureKit, AVFoundation, CoreGraphics, Security,
-  UserNotifications).
-* **2-line OSD with punctuation-aware splitting** — fragments are buffered and
-  split on CJK / Latin punctuation or 1.5 s speech pauses; up to 2 sentences
-  stay on screen at once.
-* **Configurable font size (14–72 pt), draggable, persistent** — unlock the
-  OSD to drag it anywhere; click-through by default so it never blocks the app
-  underneath.
-* **Inactivity auto-stop** — optionally stop the session after 5 / 15 / 30 /
-  60 min without audio.
+### Audio sources
+- **System audio** — any audio playing on the device (ScreenCaptureKit on macOS, MediaProjection on Android)
+- **Per-app isolation** (macOS) — restrict capture to a single application (e.g. Chrome, Spotify); everything else is filtered out at the ScreenCaptureKit layer, so you can translate a YouTube video without picking up notification sounds or music from another app
+- **Microphone input** — internal or external mic for translating live conversations (Android uses `VOICE_RECOGNITION` source with a flat frequency response optimized for ASR)
 
-> The Gemini protocol and reconnect logic is a Swift port of
-> `gemini-live-translate-livekit/src/lib/translation-bridge.ts`, with the
-> LiveKit audio transport replaced by native ScreenCaptureKit.
+### OSD experience
+- **Floating overlay** — click-through by default so it never blocks the app underneath; unlock to drag anywhere
+- **Visible across all Spaces** (macOS) / displays over other apps (Android)
+- **Configurable font size** — 14–72 pt, persisted
+- **Auto-fade** — 4 s after the last update (200 ms alpha fade)
+- **Drag clamp** (macOS) — released drags snap back inside the visible area
+- **Dynamic line budget** — large fonts on short screens shrink the line count so the OSD never exceeds screen height
 
-### Requirements
+### Quality-of-life
+- **Subtitle history** — every session is saved automatically and exportable (macOS supports SRT / VTT / JSON / TXT)
+- **Inactivity auto-stop** — optional 5 / 15 / 30 / 60 min timeout
+- **Built-in auto-update** (macOS) — Sparkle checks for new versions at launch and on demand via **Check for Updates…**
+- **Status indicator** — colored menu-bar icon (macOS) or status-card dot (Android) shows current state at a glance
 
-* macOS 14.0 or later (tested on macOS 26 Tahoe)
-* Xcode command-line tools (`xcode-select --install`)
-* A Gemini API key with access to `gemini-3.5-live-translate-preview`
+### Status colors
 
-### Build
+| Color | macOS meaning | Android meaning |
+|-------|---------------|-----------------|
+| Gray  | Stopped | Not running |
+| Yellow | Connecting / reconnecting | WebSocket opening |
+| Green | Active — streaming audio to Gemini | Active |
+| Blue  | Non-zero audio frames observed | — |
+| Red   | Error (also surfaces a notification) | Error |
 
-```sh
-swift build -c release
-```
+---
 
-The binary is emitted at `.build/release/GeminiSubtitles`.
+## Platforms
 
-### Run as a `.app` bundle
+| Platform | Status | Source |
+|----------|--------|--------|
+| macOS 14.0+ | Shipping — release builds signed with a stable self-signed cert, with built-in Sparkle auto-update | `Sources/` (Swift) |
+| Android 10+ (API 29) | Working debug builds | `shared/` + `androidApp/` (Kotlin Multiplatform) |
 
-`run.sh` builds the release binary, copies it into `GeminiSubtitles.app/`,
-re-signs the bundle, and launches via `open` so TCC sees a proper bundle
-identity:
+---
 
-```sh
-./run.sh
-```
+## macOS
 
-Launch with right-click → **Open** the first time (Gatekeeper will warn
-because the bundle is self-signed rather than Apple Developer ID-signed). To
-clear the quarantine flag on your own machine:
+### Installation
 
-```sh
-xattr -dr com.apple.quarantine GeminiSubtitles.app
-open GeminiSubtitles.app
-```
+1. Download the latest `GeminiSubtitles-vX.Y.Z.zip` from [Releases](https://github.com/gordonxc/gemini-osd-subtitles/releases)
+2. Unzip and drag `GeminiSubtitles.app` to `~/Applications` (Sparkle can self-update when the bundle lives in a user-writable location; `/Applications` prompts for an admin password on update)
+3. Launch with right-click → **Open** the first time (Gatekeeper will warn because the bundle is self-signed rather than Apple Developer ID-signed). Or clear the quarantine flag:
+   ```sh
+   xattr -dr com.apple.quarantine GeminiSubtitles.app
+   open GeminiSubtitles.app
+   ```
 
 ### First-run setup
 
-1. Click the captions-bubble icon in the menu bar → **Set API Key…** → paste
-   your Gemini API key. Stored in Keychain under `com.gemini-subtitles.apikey`.
-2. Choose a target language (defaults to Cantonese `yue`). Gemini accepts
-   base ISO 639 codes only (`yue`, `zh`, `en`, `ja`, …).
-3. Click **Start**. On first run you'll be deep-linked to **System Settings →
-   Privacy & Security → Screen Recording** — toggle **Gemini Subtitles** ON,
-   then quit and relaunch.
-4. Play any audio. Translated subtitles appear within 1–3 s. The status icon
-   flips green → **blue** the moment non-zero audio frames are observed, and
-   back to green after 3 s of silence.
+1. Click the captions-bubble icon in the menu bar → **Set API Key…** → paste your Gemini API key (stored in Keychain)
+2. Choose a target language (defaults to Cantonese `yue`)
+3. Click **Start**. On first run you'll be deep-linked to **System Settings → Privacy & Security → Screen Recording** — toggle **Gemini Subtitles** ON, then quit and relaunch
+4. Play any audio. Translated subtitles appear within 1–3 s
 
-> **macOS 26 Tahoe note:** we use ScreenCaptureKit's audio capture rather
-> than the CoreAudio process tap (`AudioHardwareCreateProcessTap`). On Tahoe
-> the CATap path silently zero-fills audio buffers for self-signed /
-> unnotarized apps with no error. ScreenCaptureKit's **Screen Recording**
-> permission works reliably.
+### Menu overview
 
-### Per-app capture
+- **Start / Stop** — toggles the capture → Gemini → OSD pipeline
+- **Target Language** — target language picker
+- **Audio Source** — three options:
+  - **System Audio** — whole-system mix
+  - **Single App** — per-app isolation (pick from currently-running apps)
+  - **Microphone** — mic input
+- **Font Size** — 14–72 pt
+- **Auto-stop** — Off / 5 / 15 / 30 / 60 min
+- **Bilingual: On/Off** — show source text alongside translation
+- **History** — view / export / clear session history
+- **Unlock OSD to Move / Lock OSD** — toggle draggability
+- **Set API Key…**
+- **Check for Updates…**
+- **Quit**
 
-Under **Audio Source → Single App** you can restrict capture to one running
-application (Chrome, Spotify, QuickTime Player, …). Only that app's audio is
-sent to Gemini; everything else is filtered out at the ScreenCaptureKit layer
-via `SCContentFilter(display:including:exceptingWindows:)`. Use cases:
+### Debugging
 
-- Translate a YouTube video without picking up notification sounds or music
-  playing in another app.
-- Isolate a video call's audio from system alerts.
-
-Notes:
-
-- The picker lists regular-policy apps with on-screen windows; it refreshes
-  each time the menu opens.
-- Selection persists by **bundle identifier** (PID would change between
-  launches). If the chosen app isn't running at Start time, capture falls
-  back to whole-system with a log line rather than failing.
-- Per-tab isolation isn't possible — browsers expose one audio stream per
-  process, not per tab.
-
-### Status icon colours
-
-| Colour  | Meaning                                                  |
-|---------|----------------------------------------------------------|
-| Gray    | Stopped                                                  |
-| Yellow  | Connecting / reconnecting                                |
-| Green   | Active — streaming audio to Gemini                       |
-| Blue    | Non-zero audio frames observed (capture is flowing)      |
-| Red     | Error (also surfaces a macOS notification)               |
-
-### OSD behaviour
-
-* **2-line rolling display** — incoming fragments are accumulated in
-  `SubtitleBuffer` and split on CJK / Latin punctuation or a 1.5 s speech
-  pause. At most 2 lines are visible at once.
-* **Font size** — picker offers 14–72 pt (default 20). Persisted in
-  UserDefaults. The window resizes dynamically.
-* **Lock / Unlock** — click-through by default; **Unlock OSD to Move** makes
-  it draggable.
-* **Auto-fade** 4 s after the last update (200 ms alpha fade). Auto-hides on
-  the 3-s silence demotion.
-* **Visible across all Spaces** (`collectionBehavior = .canJoinAllSpaces`).
-
-### Menu
-
-* **Start / Stop** — toggles the capture → Gemini → OSD pipeline.
-* **Target Language** — picker (curated, defaults to Cantonese).
-* **Audio Source** — system default, a specific output device, **a single application** (per-app isolation), or the microphone.
-* **Font Size** — 14–72 pt.
-* **Auto-stop** — Off / 5 / 15 / 30 / 60 min inactivity timeout.
-* **Unlock OSD to Move / Lock OSD** — toggle draggability.
-* **Set API Key…** — modal prompt storing the key in Keychain.
-* **Check for Updates…** — manually invokes Sparkle's update check against `appcast.xml` (also checked once at launch).
-* **Quit**
-
-### Architecture (macOS)
-
-```
-ScreenCaptureKit ──Float32 PCM──▶ AudioPipeline ──base64 Int16 PCM──▶ GeminiClient
-                                       (48 kHz, 100 ms chunks)               │
-                                                                            │ WS
-                                                                            ▼
-                                                                   BidiGenerateContent
-                                                                            │
-                                                                   outputTranscription
-                                                                            │
-                                                                            ▼
-                                              SubtitleBuffer ──split on punctuation / pause──▶ onUpdate
-                                                                                                    │
-       SubtitleWindow ◀────────────────────────────────────────────────── handleTranscription(text)
-```
-
-| File                          | Responsibility                                                  |
-|-------------------------------|-----------------------------------------------------------------|
-| `main.swift` / `AppDelegate`  | Bootstrap, status item, icon tinting                            |
-| `StatusMenuController`        | Menu, language / audio-source / font-size / auto-stop pickers, API-key alert |
-| `KeychainStore`               | `SecItem` wrapper for the API key                               |
-| `Permissions`                 | Screen Capture TCC preflight / request / deep-link              |
-| `AudioCapture`                | `SCStream` wrapper, AudioBufferList → Float32                   |
-| `AudioPipeline`               | Float32→Int16, base64, 100 ms framing                           |
-| `GeminiClient`                | `URLSessionWebSocketTask`, setup, receive loop, reconnect       |
-| `GeminiProtocol`              | Setup / realtimeInput / outputTranscription message helpers     |
-| `SubtitleBuffer`              | Accumulates fragments, splits on punctuation / pause, 2-line window |
-| `SubtitleWindow` / `SubtitleViewController` | Floating panel, font resize, lock/unlock, fade timer |
-| `NotificationManager`         | `UNUserNotificationCenter` for critical errors                  |
-| `DebugLog`                    | File logger (`~/Library/Logs/GeminiSubtitles.log`) bypassing unified-log privacy masking |
-| `AppCoordinator`              | Orchestrates capture ↔ Gemini ↔ OSD; maps status to icon/menu   |
-
-### Auto-update (Sparkle 2)
-
-The macOS app ships with [Sparkle 2](https://github.com/sparkle-project/Sparkle)
-for in-app self-update. How it works:
-
-* On launch, the app fetches `appcast.xml` once (single check — no background
-  polling).
-* You can also trigger a manual check at any time via menu bar →
-  **Check for Updates…**.
-* When a newer version is found, Sparkle shows its standard update window;
-  confirming downloads the archive, verifies its EdDSA signature, replaces
-  the `.app` bundle in place, and relaunches.
-* The update archive is EdDSA-signed independently of the code-signing
-  certificate, so Sparkle can verify tamper-resistance even though the bundle
-  itself is self-signed.
-* **Install-location caveat:** Sparkle can replace the bundle without
-  elevation when it lives in a user-writable location (`~/Applications`,
-  `~/Downloads`, …). If installed under `/Applications`, Sparkle will prompt
-  for an admin password.
-
-Feed URL (from `SUFeedURL` in `Info.plist`):
-
-```
-https://raw.githubusercontent.com/gordonxc/gemini-osd-subtitles/main/appcast.xml
-```
-
-#### Publishing a new release
-
-1. Bump `CFBundleShortVersionString` in
-   `Sources/GeminiSubtitles/Assets/Info.plist` to the new version (e.g.
-   `0.7.0`).
-2. Make sure you have a Sparkle EdDSA keypair (one-time setup):
-   ```sh
-   .build/artifacts/sparkle/Sparkle/bin/generate_keys
-   ```
-   `generate_keys` prints the public key — paste it into Info.plist's
-   `SUPublicEDKey`. The private key is stored in your login Keychain
-   (never written to disk); to publish from another machine, export it
-   with `generate_keys -x <file>` and import there with `-f`.
-3. Run:
-   ```sh
-   ./publish-release.sh 0.7.0 "Release notes..."
-   ```
-   The script: builds the release → `ditto`-zips the `.app` → EdDSA-signs
-   it via `sign_update` → `gh release create` uploads it to GitHub Releases
-   → regenerates `appcast.xml` → commits & pushes.
-
-`appcast.xml` is the source of truth and is updated in the repo on every
-release; client apps read it via the raw GitHub URL above.
-
-### Debugging (macOS)
-
-Diagnostic logs are written to `~/Library/Logs/GeminiSubtitles.log`. Tail
-with:
+Diagnostic logs are written to `~/Library/Logs/GeminiSubtitles.log`:
 
 ```sh
 tail -f ~/Library/Logs/GeminiSubtitles.log
 ```
 
-Key signals to grep for:
-
-* `AudioCapture SCK: ... silent=false` — audio frames flowing (icon turns blue).
-* `GeminiClient setupComplete received ✓` — WebSocket setup succeeded.
-* `AudioPipeline emit chunk #N` — audio chunks being sent to Gemini.
-* `GeminiClient.handleIncoming` — raw server responses (translations live
-  under `serverContent.outputTranscription.text`).
-
 ---
 
-## Android app (KMP port)
+## Android
 
-A Kotlin Multiplatform port. Shares the Gemini protocol, audio pipeline, and
-subtitle buffering in `shared/commonMain`, with Android-specific
-implementations in `shared/androidMain` and `androidApp`.
+### Installation
 
-### Platform decisions
+1. Download the latest `androidApp-debug.apk` from [Releases](https://github.com/gordonxc/gemini-osd-subtitles/releases) (or build it yourself: `gradle assembleDebug`)
+2. `adb install -r androidApp-debug.apk` (or tap the APK on the device to install)
 
-- **Audio capture:** MediaProjection + AudioPlaybackCaptureConfiguration (system audio)
-- **OSD:** WindowManager TYPE_APPLICATION_OVERLAY (floating, click-through, draggable)
-- **UI:** Jetpack Compose (Settings) + traditional View (Overlay)
-- **iOS:** Deferred — KMP architecture reserves the slot via platform interfaces
+### First-run setup
 
-### Requirements
+1. Open the app → enter your Gemini API key
+2. Choose a target language (defaults to Cantonese)
+3. Tap **Start** → grant "Display over other apps" permission if prompted
+4. System will ask for screen capture permission (MediaProjection) → **Start now**
+   * In Mic mode: RECORD_AUDIO permission prompt → Allow
+5. Play any audio — translated subtitles appear in the floating overlay
 
-- Android 10+ (API 29)
-- A Gemini API key with access to `gemini-3.5-live-translate-preview`
-- JDK 17 (Gradle 8.11.1 + AGP 8.7.3 + Kotlin 2.1.0)
+### Audio source switching
 
-### Build
+The settings screen has an **Audio Source** switch:
 
-The repo doesn't include a `gradlew` wrapper, so use a local Gradle 8.11.1
-(AGP 8.7.3 is incompatible with newer Gradle):
+- **System Audio (default)** — MediaProjection captures any app's playback audio. Great for translating videos / music
+- **Microphone** — `AudioRecord` + `VOICE_RECOGNITION`. Great for translating live conversations
 
-```sh
-# Point Gradle at your Android SDK install
-echo "sdk.dir=$HOME/Library/Android/sdk" > local.properties
-
-# Build the debug APK
-gradle assembleDebug        # if you have gradle 8.11.1 on PATH, or:
-/path/to/gradle-8.11.1/bin/gradle assembleDebug
-```
-
-The APK is emitted at `androidApp/build/outputs/apk/debug/androidApp-debug.apk`.
-
-Install on a connected device:
-
-```sh
-adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk
-```
+Switching while running automatically restarts the pipeline.
 
 ### Permissions
 
 | Permission | Why |
 |------------|-----|
 | `INTERNET` + `ACCESS_NETWORK_STATE` | Reach the Gemini WebSocket endpoint |
-| `RECORD_AUDIO` | Audio capture via MediaProjection |
-| `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_MEDIA_PROJECTION` | Background audio capture |
+| `RECORD_AUDIO` | Audio capture via MediaProjection and microphone |
+| `FOREGROUND_SERVICE` + `_MEDIA_PROJECTION` + `_MICROPHONE` | Background audio capture |
 | `SYSTEM_ALERT_WINDOW` | Floating subtitle overlay |
 | `POST_NOTIFICATIONS` | Error notifications (Android 13+) |
 
-### First-run setup
-
-1. Open app → enter Gemini API key
-2. Choose target language (defaults to Cantonese `yue`)
-3. Tap **Start** → grant "Display over other apps" permission if prompted
-4. System will ask for screen capture permission (MediaProjection) → **Start now**
-5. Play any audio — translated subtitles appear in the floating overlay
-
-### Architecture (Android)
-
-```
-MediaProjection ──Float32 PCM──▶ AudioPipeline ──base64 Int16 PCM──▶ GeminiClient
-            (48 kHz, 100 ms chunks)                                         │
-                                                                            │ WS
-                                                                            ▼
-                                                                   BidiGenerateContent
-                                                                            │
-                                                                   outputTranscription
-                                                                            │
-                                                                            ▼
-                                              SubtitleBuffer ──split on punctuation / pause──▶ onUpdate
-                                                                                                    │
-                                         SubtitleOverlayView ◀──────────────────── updateText(text)
-```
-
-### Module structure
-
-| Module | Content |
-|--------|---------|
-| `shared/commonMain` | GeminiClient, GeminiProtocol, AudioPipeline, SubtitleBuffer, Languages, AppCoordinator + platform interfaces |
-| `shared/androidMain` | Android DebugLog, Base64 |
-| `androidApp` | MainActivity (Compose), SubtitleService, MediaProjectionAudioCapture, SubtitleOverlayView, EncryptedApiKeyStore |
-
-### Status
-
-| App state | Meaning |
-|-----------|---------|
-| Stopped | Not running |
-| Connecting to Gemini… | WebSocket opening |
-| Running · {Language} | Active — streaming audio to Gemini |
-| Listening · {Language} | Non-zero audio frames observed |
-| Error | Something went wrong (check notification) |
-
-### Debugging (Android)
-
-Diagnostic logs go through `android.util.Log.d` under tag `GeminiSubtitles`.
-Capture them with:
+### Debugging
 
 ```sh
 adb logcat -s GeminiSubtitles:D
-# Crash traces:
-adb logcat -b crash
+adb logcat -b crash    # crash traces
 ```
-
-Key signals to grep for:
-
-* `GeminiClient.webSocket connected` — TCP/TLS handshake done.
-* `GeminiClient received frame #N: Binary` — Gemini typically sends JSON as
-  Binary frames; the client decodes both Binary and Text.
-* `GeminiClient setupComplete received ✓` — handshake succeeded; ready for
-  audio.
-* `AppCoordinator.beginAudioCaptureIfRunning: starting capture` — capture
-  kicked off after a 500 ms grace period.
-* `AudioPipeline emit chunk #N` — audio chunks being sent to Gemini.
-
-### Known gotchas
-
-* **Ktor 3.x package rename:** WebSocket APIs moved from
-  `io.ktor.client.plugins.websockets` (plural) in 2.x to
-  `io.ktor.client.plugins.websocket` (singular) in 3.x. Both this code and
-  the imports reflect 3.x.
-* **Binary frames:** Gemini's bidi endpoint acks `setup` with a Binary
-  (not Text) frame. The receive loop decodes both as UTF-8 JSON.
-* **No gradle wrapper:** the merge brought `gradle-wrapper.properties` only,
-  no `gradlew` / `gradlew.bat`. Use a local Gradle 8.11.1 install.
 
 ---
 
 ## Reference
 
-* Gemini setup message and reconnect pattern: ported from
-  `gemini-live-translate-livekit/src/lib/translation-bridge.ts`.
-* Language list: curated subset of
-  `gemini-live-translate-livekit/src/lib/languages.ts`.
+The Gemini protocol and reconnect logic is ported from
+[`gemini-live-translate-livekit`](https://github.com/pixellegend/gemini-live-translate-livekit)'s
+`translation-bridge.ts`. The language list is a curated subset of the same
+source.
