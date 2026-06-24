@@ -2,50 +2,43 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key>
-    <string>Gemini Subtitles</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.gemini-subtitles</string>
-    <key>CFBundleVersion</key>
-    <string>1</string>
-    <key>CFBundleShortVersionString</key>
-    <string>0.7.0</string>
-    <key>CFBundleExecutable</key>
-    <string>GeminiSubtitles</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>LSUIElement</key>
-    <true/>
-    <key>LSMinimumSystemVersion</key>
-    <string>13.2</string>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>Gemini Subtitles captures system audio or microphone input to translate it into on-screen subtitles.</string>
-    <key>NSAudioCaptureUsageDescription</key>
-    <string>Gemini Subtitles captures system audio or microphone input to translate it into on-screen subtitles.</string>
-    <key>NSSystemAudioRecordingUsageDescription</key>
-    <string>Gemini Subtitles captures system audio to translate it into on-screen subtitles.</string>
-    <key>NSScreenCaptureDescription</key>
-    <string>Gemini Subtitles uses screen capture (audio-only) to capture system audio for live translation subtitles.</string>
-    <!-- Sparkle 2 — in-app self-update. -->
-    <key>SUFeedURL</key>
-    <string>https://raw.githubusercontent.com/gordonxc/gemini-osd-subtitles/main/appcast.xml</string>
-    <!-- EdDSA public key used to verify update archives. The matching
-         private key lives in the macOS Keychain (created by
-         `Sparkle.framework/Resources/generate_keys`). -->
-    <key>SUPublicEDKey</key>
-    <string>EixeW10FR+1YeNEauPqucGKUClazBKZ9zU/fqfdx3OE=</string>
-    <!-- Single launch-time check only — no background polling. The user
-         drives checks on demand via "Check for Updates…". -->
-    <key>SUEnableAutomaticUpdates</key>
-    <false/>
-    <key>SUAutomaticallyUpdate</key>
-    <false/>
-    <key>SUAllowsAutomaticUpdates</key>
-    <false/>
-    <!-- Required by Sparkle 2 for the XPC installer launcher service. -->
-    <key>SUEnableInstallerLauncherService</key>
-    <true/>
-    <key>SUShowReleaseNotes</key>
-    <true/>
+	<key>CFBundleExecutable</key>
+	<string>GeminiSubtitles</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.gemini-subtitles</string>
+	<key>CFBundleName</key>
+	<string>Gemini Subtitles</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.8.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.2</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Gemini Subtitles captures system audio or microphone input to translate it into on-screen subtitles.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Gemini Subtitles captures system audio or microphone input to translate it into on-screen subtitles.</string>
+	<key>NSScreenCaptureDescription</key>
+	<string>Gemini Subtitles uses screen capture (audio-only) to capture system audio for live translation subtitles.</string>
+	<key>NSSystemAudioRecordingUsageDescription</key>
+	<string>Gemini Subtitles captures system audio to translate it into on-screen subtitles.</string>
+	<key>SUAllowsAutomaticUpdates</key>
+	<false/>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUEnableAutomaticUpdates</key>
+	<false/>
+	<key>SUEnableInstallerLauncherService</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://raw.githubusercontent.com/gordonxc/gemini-osd-subtitles/main/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>EixeW10FR+1YeNEauPqucGKUClazBKZ9zU/fqfdx3OE=</string>
+	<key>SUShowReleaseNotes</key>
+	<true/>
 </dict>
 </plist>
