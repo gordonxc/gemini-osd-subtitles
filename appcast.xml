@@ -14,6 +14,18 @@
 -->
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
+        <item>
+            <title>Version 0.7.0</title>
+            <pubDate>Wed, 24 Jun 2026 11:38:20 +0100</pubDate>
+            <sparkle:version>0.7.0</sparkle:version>
+            <sparkle:edSignature>8EVlRsZnmQn8Sl21IhwB8RGNB5Fb2cOP6vcSNpIsnF1+3DOD2CoG9H3nSELuyB/afj8/MACJayqCz+zLQg6HDw==</sparkle:edSignature>
+            <description><![CDATA[Sparkle 2 in-app auto-update. The app now checks for updates at launch and on demand via the new "Check for Updates…" menu item. Future releases ship through the appcast feed at appcast.xml.]]></description>
+            <enclosure
+                url="https://github.com/gordonxc/gemini-osd-subtitles/releases/download/v0.7.0/GeminiSubtitles-v0.7.0.zip"
+                sparkle:edSignature="8EVlRsZnmQn8Sl21IhwB8RGNB5Fb2cOP6vcSNpIsnF1+3DOD2CoG9H3nSELuyB/afj8/MACJayqCz+zLQg6HDw=="
+                length="1254765"
+                type="application/octet-stream" />
+        </item>
         <title>Gemini Subtitles</title>
         <link>https://github.com/gordonxc/gemini-osd-subtitles</link>
         <description>Release feed for Gemini Subtitles</description>
