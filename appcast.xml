@@ -13,6 +13,18 @@
         <link>https://github.com/gordonxc/gemini-osd-subtitles</link>
         <description>Release feed for Gemini Subtitles</description>
         <language>en</language>
+                <item>
+            <title>Version 0.9.0</title>
+            <pubDate>Wed, 24 Jun 2026 20:14:15 +0100</pubDate>
+            <sparkle:version>0.9.0</sparkle:version>
+            <sparkle:edSignature>LmZNInkcG17oiFUWjVPhVOSUbEvoCUIDPb2N/ubJ6Iroyo/29m3YR1CHAuIChunIh09MhVQmat4Ige9L+gHhCQ==</sparkle:edSignature>
+            <description><![CDATA[OSD length cap on both platforms: long subtitle lines now wrap to up to 4 lines and head-truncate (drop leading characters with a leading …) so the most recent words stay visible. Max width is screen-relative with a 1200pt ceiling, and the line budget shrinks dynamically at large font sizes so the OSD never overflows the top of the screen. On macOS the bilingual original field now hides when out of vertical room, and dragging the OSD snaps it back on-screen on release.]]></description>
+            <enclosure
+                url="https://github.com/gordonxc/gemini-osd-subtitles/releases/download/v0.9.0/GeminiSubtitles-v0.9.0.zip"
+                sparkle:edSignature="LmZNInkcG17oiFUWjVPhVOSUbEvoCUIDPb2N/ubJ6Iroyo/29m3YR1CHAuIChunIh09MhVQmat4Ige9L+gHhCQ=="
+                length="1267075"
+                type="application/octet-stream" />
+        </item>
         <item>
             <title>Version 0.8.0</title>
             <pubDate>Wed, 24 Jun 2026 12:50:37 +0100</pubDate>
