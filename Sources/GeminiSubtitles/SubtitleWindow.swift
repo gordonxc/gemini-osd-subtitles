@@ -13,6 +13,31 @@ final class SubtitleWindow: NSPanel {
     /// user can drag it via `isMovableByWindowBackground`.
     private(set) var locked = true
 
+    // MARK: Geometry constants (OSD length cap — see design Q5/Q6)
+
+    /// Hard ceiling on translation line count. From design Q3.
+    private static let absoluteMaxTranslationLines = 4
+    /// Hard ceiling on original (bilingual) line count. From design Q8.
+    private static let absoluteMaxOriginalLines = 2
+    /// Vertical offset of the OSD's bottom edge above the visible-frame
+    /// bottom. Matches `reposition()`'s anchor.
+    private static let bottomAnchor: CGFloat = 120
+    /// Top margin — OSD must not touch the menu bar / notch.
+    private static let topMargin: CGFloat = 50
+    /// Internal vertical padding inside the OSD (above + below text).
+    private static let padding: CGFloat = 16
+    /// Width ceiling — past this, lines are hard to scan. From design Q5.
+    private static let widthCeiling: CGFloat = 1200
+    /// Total horizontal margin (both sides combined). From design Q5.
+    private static let widthMargin: CGFloat = 100
+
+    /// Last-computed line caps for the current font + screen. Read by the
+    /// view controller when applying font size so each field's
+    /// `maximumNumberOfLines` matches the geometry budget. Recomputed in
+    /// `resizeForFontSize`.
+    private(set) var translationMaxLines: Int = 4
+    private(set) var originalMaxLines: Int = 2
+
     init() {
         // `.nonactivatingPanel` keeps the panel from stealing focus from the
         // app the user is in; combined with `.borderless` it draws no chrome.
@@ -42,6 +67,21 @@ final class SubtitleWindow: NSPanel {
         reposition()
         alphaValue = 0.0  // hidden until first update
         orderOut(nil)
+
+        // Drag clamp (design Q7): when the user finishes dragging, snap the
+        // frame back inside the visible frame if any edge is off-screen.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(windowDidMove(_:)),
+            name: NSWindow.didMoveNotification, object: self)
+        // Recompute geometry if the display layout changes (external display
+        // attach/detach, resolution change, menu bar height change).
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(screenParametersChanged(_:)),
+            name: NSApplication.didChangeScreenParametersNotification, object: nil)
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     var subtitleView: SubtitleViewController? {
@@ -100,19 +140,55 @@ final class SubtitleWindow: NSPanel {
         ignoresMouseEvents = true
     }
 
-    /// Resize the OSD to fit a new font size, preserving the horizontal
-    /// center. Height accommodates 2 wrapped translation lines plus an
-    /// optional smaller original line above (bilingual mode); width scales
-    /// with the font and is capped to leave margin on the screen.
+    /// Resize the OSD for a new font size, recomputing the dynamic line
+    /// budget (design Q6) and applying the 1200pt width ceiling (design Q5).
+    ///
+    /// Per design Q10 (fixed allocation), the window always sizes for the
+    /// *maximum* line budget at the current font — empty space is transparent
+    /// so a short subtitle doesn't visually shrink the OSD.
+    ///
+    /// Per design Q8 (translation wins), the translation field gets up to 4
+    /// lines first; the original field gets only the leftover height (capped
+    /// at 2), and hides entirely if there's no room.
     func resizeForFontSize(_ size: CGFloat) {
-        let lineHeight = size * 1.4
-        // 2 translation lines + 1 original line (~0.7×) + padding.
-        let originalContribution = Int(size * 0.7 * 1.4)
-        let newHeight = max(84, Int(lineHeight * 2 + 16) + originalContribution)
-        let preferredWidth = Int(size * 36)   // ~ comfortable for a subtitle line
+        let translationLineHeight = size * 1.4
+        let originalLineHeight = size * 0.7 * 1.4
+
+        // Available vertical space from the bottom anchor to a top margin.
+        let availableHeight: CGFloat = {
+            guard let screen = NSScreen.main else { return 600 }
+            return screen.visibleFrame.height
+                - SubtitleWindow.bottomAnchor
+                - SubtitleWindow.topMargin
+        }()
+
+        // Translation wins: up to 4 lines, capped by available height.
+        let translationFromHeight = Int(floor(
+            max(0, availableHeight - SubtitleWindow.padding) / translationLineHeight))
+        translationMaxLines = max(1, min(
+            SubtitleWindow.absoluteMaxTranslationLines, translationFromHeight))
+
+        // Original gets the leftover, up to 2 lines. 0 = hide entirely.
+        let leftover = max(0,
+            availableHeight - SubtitleWindow.padding
+            - CGFloat(translationMaxLines) * translationLineHeight)
+        let originalFromLeftover = Int(floor(leftover / originalLineHeight))
+        originalMaxLines = max(0, min(
+            SubtitleWindow.absoluteMaxOriginalLines, originalFromLeftover))
+
+        // Window height: always allocate for the max-case (fixed-allocation
+        // policy, Q10) so text updates don't trigger layout passes.
+        let translationHeight = CGFloat(translationMaxLines) * translationLineHeight
+        let originalHeight = CGFloat(originalMaxLines) * originalLineHeight
+        let newHeight = max(84,
+            Int(translationHeight + originalHeight + SubtitleWindow.padding))
+
+        // Width: screen-relative with margin, capped at 1200pt (Q5).
+        let preferredWidth = Int(size * 36)
         let maxWidth: Int = {
             guard let screen = NSScreen.main else { return 1600 }
-            return Int(screen.visibleFrame.width) - 100
+            let screenMax = Int(screen.visibleFrame.width) - Int(SubtitleWindow.widthMargin)
+            return min(screenMax, Int(SubtitleWindow.widthCeiling))
         }()
         let newWidth = max(720, min(preferredWidth, maxWidth))
 
@@ -125,6 +201,11 @@ final class SubtitleWindow: NSPanel {
 
         // Update the content view's size to match so layout re-flows.
         contentViewController?.view.frame = NSRect(origin: .zero, size: frame.size)
+
+        // Push the new line caps to the fields so wrapping + head-truncation
+        // use the same budget as the window geometry.
+        subtitleView?.applyLineCaps(
+            translation: translationMaxLines, original: originalMaxLines)
     }
 
     private func fadeOut() {
@@ -143,5 +224,60 @@ final class SubtitleWindow: NSPanel {
         let x = visible.minX + (visible.width - size.width) / 2.0
         let y = visible.minY + 120
         setFrameOrigin(NSPoint(x: x, y: y))
+    }
+
+    // MARK: Drag clamp (design Q7)
+
+    @objc private func windowDidMove(_ note: Notification) {
+        clampFrameToScreen(animated: true)
+    }
+
+    @objc private func screenParametersChanged(_ note: Notification) {
+        // Display layout changed — recompute the line budget for the current
+        // font size and re-clamp the position to the new visible frame.
+        let size = subtitleView?.currentFontSize ?? SubtitleViewController.defaultSize
+        resizeForFontSize(size)
+        clampFrameToScreen(animated: false)
+    }
+
+    /// Snap the frame back inside the visible frame if any edge is off-screen.
+    /// If the window's center has been dragged entirely off-screen (rare but
+    /// possible via multi-display layouts), reset to the default anchor.
+    private func clampFrameToScreen(animated: Bool) {
+        guard let screen = screenContainingCenter ?? NSScreen.main else { return }
+        let visible = screen.visibleFrame
+        var frame = self.frame
+
+        // Center fully off-screen → reset to default position.
+        let center = NSPoint(x: frame.midX, y: frame.midY)
+        if !visible.contains(center) {
+            frame.origin.x = visible.minX + (visible.width - frame.width) / 2.0
+            frame.origin.y = visible.minY + SubtitleWindow.bottomAnchor
+            setFrame(frame, display: true, animate: animated)
+            return
+        }
+
+        var moved = false
+        if frame.maxX > visible.maxX {
+            frame.origin.x = visible.maxX - frame.width; moved = true
+        }
+        if frame.minX < visible.minX {
+            frame.origin.x = visible.minX; moved = true
+        }
+        if frame.maxY > visible.maxY {
+            frame.origin.y = visible.maxY - frame.height; moved = true
+        }
+        if frame.minY < visible.minY {
+            frame.origin.y = visible.minY; moved = true
+        }
+        if moved {
+            setFrame(frame, display: true, animate: animated)
+        }
+    }
+
+    /// Returns the screen whose frame contains this window's center, if any.
+    private var screenContainingCenter: NSScreen? {
+        let center = NSPoint(x: frame.midX, y: frame.midY)
+        return NSScreen.screens.first { $0.frame.contains(center) }
     }
 }

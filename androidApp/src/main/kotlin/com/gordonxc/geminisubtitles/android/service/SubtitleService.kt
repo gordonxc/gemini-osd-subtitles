@@ -7,6 +7,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.content.res.Configuration
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
@@ -69,6 +70,13 @@ class SubtitleService : Service(), PlatformNotifier {
     private var serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Rotation / multi-window resize — recompute OSD geometry so it
+        // doesn't keep stale dimensions after a screen-geometry change.
+        overlay?.onConfigurationChanged(newConfig)
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
