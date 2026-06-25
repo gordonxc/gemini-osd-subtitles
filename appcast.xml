@@ -13,7 +13,33 @@
         <link>https://github.com/gordonxc/gemini-osd-subtitles</link>
         <description>Release feed for Gemini Subtitles</description>
         <language>en</language>
-                        <item>
+                                <item>
+            <title>Version 0.9.2</title>
+            <pubDate>Thu, 25 Jun 2026 10:11:57 +0100</pubDate>
+            <sparkle:version>0.9.2</sparkle:version>
+            <sparkle:edSignature>J3VTr8mXa3HUIHbTddofI4yTYFhnCPSClsaOjwiK5/onQ4divxymKccNOd1srS+oNMD12VJHkjg6CsSq2Ej/AA==</sparkle:edSignature>
+            <description><![CDATA[Bug-fix release covering eight issues across macOS, Android, and the shared KMP core.
+
+Shared (both platforms):
+- Audio buffer compaction is now O(n) amortized instead of O(n²) per chunk — fixes a steady CPU spike at 10 Hz on Android
+
+macOS:
+- GeminiClient state mutations from the WebSocket receive callback are now confined to the main queue (was racing start/stop/openConnection)
+- Transient send failures no longer fire user-visible error notifications (the receive loop is authoritative for connection death)
+- MicrophoneCapture cleans up its tap on every start error path
+- HistoryStore now logs write failures (was silently swallowing them)
+- AppCoordinator's 5 s ready-not-received fallback runs on the main queue
+
+Android:
+- MediaProjection is now stopped on capture stop (was leaking the screen-capture grant; on Android 14+ this also violated the foreground-service-type coupling rule)
+- WindowManager exceptions in the overlay are now logged instead of swallowed]]></description>
+            <enclosure
+                url="https://github.com/gordonxc/gemini-osd-subtitles/releases/download/v0.9.2/GeminiSubtitles-v0.9.2.zip"
+                sparkle:edSignature="J3VTr8mXa3HUIHbTddofI4yTYFhnCPSClsaOjwiK5/onQ4divxymKccNOd1srS+oNMD12VJHkjg6CsSq2Ej/AA=="
+                length="1268856"
+                type="application/octet-stream" />
+        </item>
+        <item>
             <title>Version 0.9.1</title>
             <pubDate>Wed, 24 Jun 2026 20:38:07 +0100</pubDate>
             <sparkle:version>0.9.1</sparkle:version>
