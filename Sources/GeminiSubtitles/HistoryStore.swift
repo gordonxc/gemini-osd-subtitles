@@ -103,7 +103,16 @@ final class HistoryStore {
         // Create the file (empty) so it exists on disk even if no entries
         // arrive before Stop.
         FileManager.default.createFile(atPath: url.path, contents: nil)
-        currentFileHandle = try? FileHandle(forWritingTo: url)
+        do {
+            currentFileHandle = try FileHandle(forWritingTo: url)
+        } catch {
+            // History is best-effort, but the user should know the session
+            // isn't being recorded (disk full, permissions, etc.). Log
+            // once on session start; per-append failures below would just
+            // repeat the same error.
+            DebugLog.write("HistoryStore.beginSession: could not open file handle for \(url.lastPathComponent): \(error.localizedDescription)")
+            currentFileHandle = nil
+        }
         currentSessionURL = url
         currentSessionStart = now
         currentLanguageCode = languageCode
@@ -125,10 +134,20 @@ final class HistoryStore {
         if let original = original, !original.isEmpty {
             payload["original"] = original
         }
-        if let data = try? JSONSerialization.data(withJSONObject: payload),
-           data.count > 0 {
-            try? handle.write(contentsOf: data)
-            try? handle.write(contentsOf: Data([0x0A]))  // '\n'
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              data.count > 0 else {
+            DebugLog.write("HistoryStore.append: JSON serialization failed for entry at \(entry.ts)")
+            return
+        }
+        do {
+            try handle.write(contentsOf: data)
+            try handle.write(contentsOf: Data([0x0A]))  // '\n'
+        } catch {
+            // Once the handle is broken, stop trying — log once and mark
+            // the handle nil so subsequent appends no-op instead of
+            // spamming the same error 10×/sec.
+            DebugLog.write("HistoryStore.append: write failed, disabling session: \(error.localizedDescription)")
+            currentFileHandle = nil
         }
 
         if Thread.isMainThread {

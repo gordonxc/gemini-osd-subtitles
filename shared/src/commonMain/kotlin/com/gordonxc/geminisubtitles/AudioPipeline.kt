@@ -12,12 +12,22 @@ class AudioPipeline {
 
     var onChunk: ((String) -> Unit)? = null
 
+    /**
+     * Backing accumulator with a head index. Samples are appended at the tail
+     * and consumed via `head += CHUNK_SIZE`; the buffer is compacted in O(n)
+     * once `head` crosses `compactThreshold`, giving amortized O(1) per
+     * sample. A naive `removeAt(0)` per chunk is O(n²) at 10 Hz — this is
+     * the same pattern the Swift port uses (AudioPipeline.swift:50-60).
+     */
     private val buffer = ArrayList<Float>(CHUNK_SIZE * 2)
+    private var head = 0
     private var chunksEmitted = 0UL
     private val lock = Any()
 
     companion object {
         const val CHUNK_SIZE = 4800  // 100 ms @ 48 kHz
+        /** Compact the buffer once head reaches this many consumed samples. */
+        const val COMPACT_THRESHOLD = CHUNK_SIZE * 2
     }
 
     /** Append a Float32 sample run. Thread-safe. */
@@ -27,8 +37,15 @@ class AudioPipeline {
         synchronized(lock) {
             for (s in samples) buffer.add(s)
 
-            while (buffer.size >= CHUNK_SIZE) {
+            while ((buffer.size - head) >= CHUNK_SIZE) {
                 convertAndEmit()
+                head += CHUNK_SIZE
+                if (head >= COMPACT_THRESHOLD) {
+                    // subList().clear() shifts the tail in a single O(n)
+                    // pass — removeAt(0) in a loop would be O(n²) in head.
+                    buffer.subList(0, head).clear()
+                    head = 0
+                }
             }
         }
     }
@@ -36,9 +53,12 @@ class AudioPipeline {
     /** Flush any buffered samples as a final (shorter) chunk. */
     fun flush() {
         synchronized(lock) {
-            if (buffer.isNotEmpty()) {
+            val remaining = buffer.size - head
+            if (remaining > 0) {
                 convertAndEmit(all = true)
             }
+            buffer.clear()
+            head = 0
         }
     }
 
@@ -46,6 +66,7 @@ class AudioPipeline {
     fun reset() {
         synchronized(lock) {
             buffer.clear()
+            head = 0
             chunksEmitted = 0UL
         }
     }
@@ -53,17 +74,14 @@ class AudioPipeline {
     // MARK: Private
 
     private fun convertAndEmit(all: Boolean = false) {
-        val size = if (all) buffer.size else CHUNK_SIZE
+        val size = if (all) buffer.size - head else CHUNK_SIZE
         val int16 = ShortArray(size)
         for (i in 0 until size) {
-            val scaled = buffer[i] * 32767f
+            val scaled = buffer[head + i] * 32767f
             int16[i] = scaled.toInt()
                 .coerceIn(-32768, 32767)
                 .toShort()
         }
-
-        // Remove consumed samples
-        repeat(size) { if (buffer.isNotEmpty()) buffer.removeAt(0) }
 
         // Convert ShortArray → ByteArray → base64
         val bytes = ByteArray(size * 2)

@@ -41,6 +41,9 @@ final class MicrophoneCapture {
 
     // MARK: Lifecycle
 
+    /// Starts mic capture. All failures are reported via `onError` — the
+    /// `throws` signature is kept for source compatibility but this method
+    /// never throws (every error path is caught internally).
     func start() throws {
         guard !running else { return }
         running = true
@@ -71,17 +74,21 @@ final class MicrophoneCapture {
         }
 
         let hwFormat = inputNode.outputFormat(forBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: targetFormat) {
-            [weak self] buffer, _ in
-            self?.handle(buffer: buffer)
-        }
-
-        engine.prepare()
         do {
+            // installTap and prepare can both throw (e.g. "tap already
+            // installed" if a prior start failed mid-way). Wrap them in
+            // the same do/catch as engine.start so every failure path
+            // cleans up the tap and resets `running`.
+            try inputNode.installTap(onBus: 0, bufferSize: 1024, format: targetFormat) {
+                [weak self] buffer, _ in
+                self?.handle(buffer: buffer)
+            }
+            engine.prepare()
             try engine.start()
             DebugLog.write("MicrophoneCapture: started (hwRate=\(hwFormat.sampleRate) Hz, hwCh=\(hwFormat.channelCount), tapRate=48000 tapCh=1)")
         } catch {
             running = false
+            // removeTap is safe to call even if no tap is installed.
             inputNode.removeTap(onBus: 0)
             DebugLog.write("MicrophoneCapture.start FAILED: \(error.localizedDescription)")
             onError?(error)

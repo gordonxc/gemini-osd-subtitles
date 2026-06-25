@@ -90,8 +90,21 @@ class MediaProjectionAudioCapture(
         try {
             audioRecord?.stop()
             audioRecord?.release()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            DebugLog.write("MediaProjectionAudioCapture.stop: audioRecord cleanup error: ${e.message}")
+        }
         audioRecord = null
+        // Release the MediaProjection token so the system knows we're done
+        // capturing. Without this the projection stays active (holding the
+        // user's screen-capture grant) and on Android 14+ violates the
+        // foreground-service-type coupling rule, risking the system killing
+        // the app. stop() is safe to call after the projection is no longer
+        // in use; the framework tears down the virtual display.
+        try {
+            mediaProjection.stop()
+        } catch (e: Exception) {
+            DebugLog.write("MediaProjectionAudioCapture.stop: mediaProjection.stop error: ${e.message}")
+        }
         DebugLog.write("MediaProjectionAudioCapture: stopped")
     }
 

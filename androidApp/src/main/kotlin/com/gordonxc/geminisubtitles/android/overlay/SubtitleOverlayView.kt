@@ -13,6 +13,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
+import com.gordonxc.geminisubtitles.DebugLog
 import com.gordonxc.geminisubtitles.platform.PlatformOverlay
 
 /**
@@ -118,7 +119,10 @@ class SubtitleOverlayView(
                 setLocked(true)  // Start in click-through mode
                 scheduleFade()
             } catch (e: Exception) {
-                // TYPE_APPLICATION_OVERLAY not permitted
+                // TYPE_APPLICATION_OVERLAY not permitted, or view already
+                // attached. Log so ADB can show why the overlay never
+                // appeared.
+                DebugLog.write("SubtitleOverlayView.reveal: addView failed: ${e.message}")
             }
         }
     }
@@ -127,7 +131,9 @@ class SubtitleOverlayView(
         handler.post {
             handler.removeCallbacks(fadeRunnable)
             overlayView?.let { v ->
-                try { windowManager.removeView(v) } catch (_: Exception) {}
+                try { windowManager.removeView(v) } catch (e: Exception) {
+                DebugLog.write("SubtitleOverlayView.hide: removeView failed: ${e.message}")
+            }
             }
             overlayView = null
             layoutParams = null
@@ -150,7 +156,9 @@ class SubtitleOverlayView(
                     params.width = computeWindowWidth()
                     overlayView?.let { v ->
                         v.maxLines = computeMaxLines(fontSize)
-                        try { windowManager.updateViewLayout(v, params) } catch (_: Exception) {}
+                        try { windowManager.updateViewLayout(v, params) } catch (e: Exception) {
+                    DebugLog.write("SubtitleOverlayView: updateViewLayout failed: ${e.message}")
+                }
                     }
                 }
             }
@@ -190,7 +198,9 @@ class SubtitleOverlayView(
                 params.width = computeWindowWidth()
                 overlayView?.let { v ->
                     v.maxLines = computeMaxLines(fontSize)
-                    try { windowManager.updateViewLayout(v, params) } catch (_: Exception) {}
+                    try { windowManager.updateViewLayout(v, params) } catch (e: Exception) {
+                    DebugLog.write("SubtitleOverlayView: updateViewLayout failed: ${e.message}")
+                }
                 }
             }
         }
@@ -248,7 +258,9 @@ class SubtitleOverlayView(
                     params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
                 }
                 overlayView?.let { v ->
-                    try { windowManager.updateViewLayout(v, params) } catch (_: Exception) {}
+                    try { windowManager.updateViewLayout(v, params) } catch (e: Exception) {
+                    DebugLog.write("SubtitleOverlayView: updateViewLayout failed: ${e.message}")
+                }
                 }
             }
         }
@@ -280,7 +292,9 @@ class SubtitleOverlayView(
                     if (dx * dx + dy * dy > 25) dragging = true  // 5px threshold
                     layoutParams!!.x = initialX + dx.toInt()
                     layoutParams!!.y = initialY - dy.toInt()  // invert Y (gravity BOTTOM)
-                    try { windowManager.updateViewLayout(v, layoutParams) } catch (_: Exception) {}
+                    try { windowManager.updateViewLayout(v, layoutParams) } catch (e: Exception) {
+                    DebugLog.write("SubtitleOverlayView.drag: updateViewLayout failed: ${e.message}")
+                }
                     true
                 }
                 MotionEvent.ACTION_UP -> {

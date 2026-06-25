@@ -273,7 +273,10 @@ final class AppCoordinator {
         // `.ready` never fires — capture still starts so we can show the
         // blue icon and diagnose whether audio is flowing.
         awaitingAudioStart = true
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 5.0) { [weak self] in
+        // Schedule on main so the `awaitingAudioStart` read here doesn't
+        // race with `handleGeminiStatus` (which mutates it on main). The
+        // 5 s asyncAfter is wait-time, not work — main is fine.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
             guard let self, self.awaitingAudioStart else { return }
             DebugLog.write("AppCoordinator: ready-not-received fallback firing after 5 s")
             self.beginAudioCaptureIfRunning()

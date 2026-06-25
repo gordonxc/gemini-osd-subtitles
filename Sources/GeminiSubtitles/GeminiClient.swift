@@ -111,6 +111,13 @@ final class GeminiClient {
 
     /// Sends a base64-encoded PCM audio chunk. Drops silently if not ready,
     /// mirroring translation-bridge.ts:580-586.
+    ///
+    /// Send-completion errors are logged but NOT surfaced via `onError`:
+    /// the receive loop is the authority on connection death, and it
+    /// silently schedules a reconnect (surfacing `onError` only on
+    /// exhaustion). Firing `onError` per transient send failure would
+    /// spam the user with error notifications the reconnect logic was
+    /// designed to suppress.
     func sendAudio(base64PCM: String) {
         guard isReady else {
             if audioChunksSent == 0 {
@@ -125,10 +132,11 @@ final class GeminiClient {
         if audioChunksSent % 20 == 1 {
             DebugLog.write("GeminiClient.sendAudio #\(audioChunksSent) (\(base64PCM.count) b64 chars)")
         }
-        task.send(.string(payload)) { [weak self] error in
+        task.send(.string(payload)) { error in
             if let error {
-                DebugLog.write("GeminiClient.sendAudio FAILED: \(error.localizedDescription)")
-                self?.onError?(error)
+                // Transient — the receive loop will detect the close and
+                // trigger the silent-reconnect path. See method doc above.
+                DebugLog.write("GeminiClient.sendAudio transient failure (will be picked up by receive loop): \(error.localizedDescription)")
             }
         }
     }
@@ -188,18 +196,28 @@ final class GeminiClient {
         guard let task else { return }
         task.receive { [weak self] result in
             guard let self else { return }
-            switch result {
-            case .success(let message):
-                self.handleIncoming(message)
-                if self.running { self.receiveLoop() }
-            case .failure(let error):
-                var closeInfo = ""
-                let mirror = Mirror(reflecting: task)
-                for child in mirror.children where child.label == "closeCode" {
-                    closeInfo += " closeCode=\(child.value)"
+            // The receive completion fires on a URLSession delegate queue,
+            // not main. Every state mutation below (`setupComplete`,
+            // `pendingOriginal`, `consecutiveReconnectFailures`, `status`,
+            // `running`) must be confined to main to avoid racing with
+            // `start`/`stop`/`openConnection` (which run on main). Chain
+            // the next receive on main too — `task.receive` is async so the
+            // actual wait still happens on the URLSession thread, not the
+            // main run loop.
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let message):
+                    self.handleIncoming(message)
+                    if self.running { self.receiveLoop() }
+                case .failure(let error):
+                    var closeInfo = ""
+                    let mirror = Mirror(reflecting: task)
+                    for child in mirror.children where child.label == "closeCode" {
+                        closeInfo += " closeCode=\(child.value)"
+                    }
+                    DebugLog.write("GeminiClient.receiveLoop FAILURE: \(error.localizedDescription)\(closeInfo) (nsError=\(error as NSError))")
+                    self.handleTransportError(error)
                 }
-                DebugLog.write("GeminiClient.receiveLoop FAILURE: \(error.localizedDescription)\(closeInfo) (nsError=\(error as NSError))")
-                self.handleTransportError(error)
             }
         }
     }
