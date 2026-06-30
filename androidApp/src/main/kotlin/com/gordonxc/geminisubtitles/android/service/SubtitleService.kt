@@ -9,17 +9,22 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.gordonxc.geminisubtitles.AppCoordinator
+import com.gordonxc.geminisubtitles.DebugLog
 import com.gordonxc.geminisubtitles.Languages
 import com.gordonxc.geminisubtitles.android.MainActivity
+import com.gordonxc.geminisubtitles.android.audio.AudioFileDecoder
 import com.gordonxc.geminisubtitles.android.audio.MediaProjectionAudioCapture
 import com.gordonxc.geminisubtitles.android.audio.MicrophoneAudioCapture
 import com.gordonxc.geminisubtitles.android.overlay.SubtitleOverlayView
 import com.gordonxc.geminisubtitles.android.storage.EncryptedApiKeyStore
 import com.gordonxc.geminisubtitles.platform.PlatformNotifier
+import com.gordonxc.geminisubtitles.platform.PlatformAudioCapture
+import com.gordonxc.geminisubtitles.platform.PlatformOverlay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,6 +32,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Foreground Service that runs the subtitle pipeline.
@@ -42,12 +48,14 @@ class SubtitleService : Service(), PlatformNotifier {
     companion object {
         const val ACTION_START = "com.gordonxc.geminisubtitles.START"
         const val ACTION_STOP = "com.gordonxc.geminisubtitles.STOP"
+        const val ACTION_TRANSCRIBE_FILE = "com.gordonxc.geminisubtitles.TRANSCRIBE_FILE"
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_RESULT_DATA = "result_data"
         const val EXTRA_TARGET_LANGUAGE = "target_language"
         const val EXTRA_FONT_SIZE = "font_size"
         /// `"system"` or `"mic"`. Defaults to `"system"` if absent.
         const val EXTRA_SOURCE = "audio_source"
+        const val EXTRA_AUDIO_URI = "audio_uri"
 
         /// Allowed values for EXTRA_SOURCE.
         const val SOURCE_SYSTEM = "system"
@@ -61,6 +69,11 @@ class SubtitleService : Service(), PlatformNotifier {
         val statusText = MutableStateFlow("Stopped")
         val overlayLocked = MutableStateFlow(true)
         val runState = MutableStateFlow(AppCoordinator.RunState.STOPPED)
+
+        // File transcription state
+        val isTranscribing = MutableStateFlow(false)
+        val transcriptionResult = MutableStateFlow("")
+        val transcriptionParts = MutableStateFlow<List<String>>(emptyList())
 
         var coordinator: AppCoordinator? = null
             private set
@@ -102,6 +115,11 @@ class SubtitleService : Service(), PlatformNotifier {
                 stopPipeline()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
+            }
+            ACTION_TRANSCRIBE_FILE -> {
+                val uriString = intent.getStringExtra(EXTRA_AUDIO_URI) ?: return START_NOT_STICKY
+                val targetLanguage = intent.getStringExtra(EXTRA_TARGET_LANGUAGE) ?: Languages.defaultCode
+                startFileTranscription(uriString, targetLanguage)
             }
         }
         return START_NOT_STICKY
@@ -153,6 +171,109 @@ class SubtitleService : Service(), PlatformNotifier {
         }
     }
 
+    // MARK: File transcription
+
+    private fun startFileTranscription(uriString: String, targetLanguage: String) {
+        // Reset state
+        transcriptionResult.value = ""
+        transcriptionParts.value = emptyList()
+        isTranscribing.value = true
+        statusText.value = "Decoding audio…"
+
+        // Foreground notification (no audio capture type needed)
+        createNotificationChannel()
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("Gemini Subtitles")
+            .setContentText("Translating shared audio…")
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .build()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(NOTIFICATION_ID, notification, 0)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+
+        val apiKeyStore = EncryptedApiKeyStore(this)
+        val coord = AppCoordinator(
+            apiKeyStore = apiKeyStore,
+            audioCapture = NoOpAudioCapture,
+            overlay = NoOpOverlay,
+            notifier = this,
+        )
+        coordinator = coord
+
+        val parts = mutableListOf<String>()
+
+        coord.onFileTranscription = { text, isFinal ->
+            DebugLog.write("SubtitleService onFileTranscription: text='${text.take(50)}' isFinal=$isFinal")
+            // Accumulate all parts
+            parts.add(text)
+            transcriptionParts.value = parts.toList()
+            transcriptionResult.value = parts.joinToString("")
+        }
+
+        coord.startFileTranscription(targetLanguage)
+
+        // Observe coordinator state
+        serviceScope.launch {
+            coord.state.collectLatest { state ->
+                runState.value = state
+            }
+        }
+        serviceScope.launch {
+            coord.statusText.collectLatest { text ->
+                statusText.value = text
+            }
+        }
+
+        // Decode audio file and feed samples
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                // Wait for Gemini to be ready
+                kotlinx.coroutines.delay(1000)
+
+                val decoder = AudioFileDecoder(this@SubtitleService)
+                val uri = Uri.parse(uriString)
+                statusText.value = "Decoding audio…"
+
+                withContext(Dispatchers.IO) {
+                    decoder.decode(uri) { samples ->
+                        coord.feedFileSamples(samples)
+                    }
+                }
+
+                coord.finishFileTranscription()
+                statusText.value = "Translating…"
+
+                // Wait for Gemini to return remaining transcription
+                kotlinx.coroutines.delay(5000)
+
+                // Mark transcription as done (results remain visible)
+                isTranscribing.value = false
+                if (transcriptionResult.value.isNotEmpty()) {
+                    statusText.value = "完成"
+                } else {
+                    statusText.value = "沒有偵測到語音"
+                }
+
+                // Stop the coordinator (closes Gemini connection)
+                coord.stop()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            } catch (e: Exception) {
+                DebugLog.write("SubtitleService file transcription FAILED: ${e.message}")
+                statusText.value = "Error: ${e.message}"
+            }
+        }
+    }
+
     private fun stopPipeline() {
         coordinator?.stop()
         coordinator?.destroy()
@@ -162,6 +283,7 @@ class SubtitleService : Service(), PlatformNotifier {
         statusText.value = "Stopped"
         overlayLocked.value = true
         runState.value = AppCoordinator.RunState.STOPPED
+        isTranscribing.value = false
         serviceScope.cancel()
         // Recreate scope so a subsequent start() can launch coroutines again
         serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -238,4 +360,22 @@ class SubtitleService : Service(), PlatformNotifier {
         super.onDestroy()
         stopPipeline()
     }
+}
+
+/** No-op audio capture for file transcription mode (no live audio needed). */
+private object NoOpAudioCapture : PlatformAudioCapture {
+    override var onSamples: ((samples: FloatArray, silent: Boolean) -> Unit)? = null
+    override var onError: ((Throwable) -> Unit)? = null
+    override fun start() {}
+    override fun stop() {}
+}
+
+/** No-op overlay for file transcription mode (results shown in-app, not OSD). */
+private object NoOpOverlay : PlatformOverlay {
+    override fun reveal() {}
+    override fun hide() {}
+    override fun updateText(text: String) {}
+    override fun setFontSize(size: Float) {}
+    override fun toggleLock(): Boolean = true
+    override val isLocked: Boolean = true
 }

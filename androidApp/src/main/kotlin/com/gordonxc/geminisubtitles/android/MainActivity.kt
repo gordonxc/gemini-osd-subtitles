@@ -20,10 +20,12 @@ import androidx.core.content.ContextCompat
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
+import com.gordonxc.geminisubtitles.DebugLog
 import com.gordonxc.geminisubtitles.Languages
 import com.gordonxc.geminisubtitles.android.service.SubtitleService
 import com.gordonxc.geminisubtitles.android.storage.EncryptedApiKeyStore
 import com.gordonxc.geminisubtitles.android.ui.SettingsScreen
+import com.gordonxc.geminisubtitles.android.ui.TranscriptionResultsScreen
 import kotlinx.coroutines.flow.collectLatest
 
 class MainActivity : ComponentActivity() {
@@ -50,9 +52,12 @@ class MainActivity : ComponentActivity() {
 
     private val prefs by lazy { getSharedPreferences("settings", Context.MODE_PRIVATE) }
 
+    private var sharedAudioUri: String? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         apiKeyStore = EncryptedApiKeyStore(this)
+        handleSharedIntent(intent)
 
         setContent {
             MaterialTheme {
@@ -60,6 +65,52 @@ class MainActivity : ComponentActivity() {
                     AppContent()
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleSharedIntent(intent)
+    }
+
+    private fun handleSharedIntent(intent: Intent?) {
+        when (intent?.action) {
+            Intent.ACTION_SEND -> {
+                val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                if (uri != null) {
+                    sharedAudioUri = uri.toString()
+                    DebugLog.write("MainActivity: received shared audio URI: $uri")
+                    // If API key is set, start transcription immediately
+                    if (!apiKeyStore.getApiKey().isNullOrEmpty()) {
+                        startTranscription(uri.toString())
+                    }
+                }
+            }
+            Intent.ACTION_SEND_MULTIPLE -> {
+                val uris = intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+                val first = uris?.firstOrNull()
+                if (first != null) {
+                    sharedAudioUri = first.toString()
+                    DebugLog.write("MainActivity: received shared audio URI (first of ${uris.size}): $first")
+                    if (!apiKeyStore.getApiKey().isNullOrEmpty()) {
+                        startTranscription(first.toString())
+                    }
+                }
+            }
+        }
+    }
+
+    private fun startTranscription(uriString: String) {
+        val serviceIntent = Intent(this, SubtitleService::class.java).apply {
+            action = SubtitleService.ACTION_TRANSCRIBE_FILE
+            putExtra(SubtitleService.EXTRA_AUDIO_URI, uriString)
+            putExtra(SubtitleService.EXTRA_TARGET_LANGUAGE, prefs.getString("target_language", Languages.defaultCode))
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
         }
     }
 
@@ -82,6 +133,45 @@ class MainActivity : ComponentActivity() {
             mutableStateOf(Settings.canDrawOverlays(this@MainActivity))
         }
         var overlayLocked by remember { mutableStateOf(true) }
+
+        // File transcription state
+        val isTranscribing by SubtitleService.isTranscribing.collectAsState()
+        val transcriptionResult by SubtitleService.transcriptionResult.collectAsState()
+        val transcriptionParts by SubtitleService.transcriptionParts.collectAsState()
+        var showTranscriptionResults by remember { mutableStateOf(false) }
+
+        // Show transcription results when transcription is active or has results
+        LaunchedEffect(isTranscribing, transcriptionResult) {
+            if (isTranscribing || transcriptionResult.isNotEmpty()) {
+                showTranscriptionResults = true
+            }
+        }
+
+        // If share intent arrives but no API key, show settings so user can set it
+        LaunchedEffect(sharedAudioUri) {
+            if (sharedAudioUri != null && apiKey.isBlank()) {
+                showTranscriptionResults = false
+            }
+        }
+
+        // Render either transcription results or settings
+        if (showTranscriptionResults) {
+            TranscriptionResultsScreen(
+                result = transcriptionResult,
+                parts = transcriptionParts,
+                statusText = statusText,
+                isTranscribing = isTranscribing,
+                onBack = {
+                    showTranscriptionResults = false
+                    sharedAudioUri = null
+                },
+                onCopy = {
+                    getSystemService(android.content.ClipboardManager::class.java)
+                        .setPrimaryClip(android.content.ClipData.newPlainText("Translation", transcriptionResult))
+                },
+            )
+            return@AppContent
+        }
 
         // Refresh overlay-permission flag every time we return to the foreground
         // (user may have just toggled it in system settings).

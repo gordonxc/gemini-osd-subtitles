@@ -213,6 +213,75 @@ class AppCoordinator(
         }
     }
 
+    // MARK: File transcription (share feature)
+
+    /** Callback for file transcription results — delivers each translated fragment. */
+    var onFileTranscription: ((text: String, isFinal: Boolean) -> Unit)? = null
+
+    /**
+     * Transcribes a pre-recorded audio file via Gemini Live.
+     *
+     * Opens a Gemini Live connection (same as [start] but without audio capture or
+     * OSD). The caller feeds PCM samples via [feedFileSamples], which are piped
+     * through the existing AudioPipeline → GeminiClient path.
+     *
+     * Once all samples are fed, call [finishFileTranscription] to flush and close.
+     */
+    fun startFileTranscription(targetLanguage: String) {
+        currentTargetLanguage = targetLanguage
+        DebugLog.write("AppCoordinator.startFileTranscription targetLanguage=$targetLanguage")
+
+        val apiKey = apiKeyStore.getApiKey()
+        if (apiKey.isNullOrEmpty()) {
+            DebugLog.write("AppCoordinator.startFileTranscription: NO API KEY")
+            _state.value = RunState.ERROR
+            _statusText.value = "No API key set"
+            notifier.notify("Gemini Subtitles", "Set your Gemini API key from settings.")
+            return
+        }
+
+        _state.value = RunState.STARTING
+        _statusText.value = "Connecting to Gemini…"
+
+        val client = GeminiClient(
+            apiKey = apiKey,
+            targetLanguage = targetLanguage,
+            httpClient = httpClient,
+        )
+        client.onTranscription = { text, isFinal ->
+            onFileTranscription?.invoke(text, isFinal)
+        }
+        client.onError = { error -> handleGeminiError(error) }
+        client.onStatusChange = { status -> handleGeminiStatus(status) }
+        gemini = client
+
+        // Wire pipeline chunks → GeminiClient (same as live mode)
+        pipeline.onChunk = { base64 ->
+            gemini?.sendAudio(base64)
+        }
+
+        client.start()
+
+        // Brief grace period for Gemini setup
+        scope.launch {
+            delay(500)
+        }
+    }
+
+    /**
+     * Feed Float32 PCM samples (mono, 48kHz) from a decoded audio file.
+     * Processes through AudioPipeline which chunks and base64-encodes for Gemini.
+     */
+    fun feedFileSamples(samples: FloatArray) {
+        pipeline.process(samples)
+    }
+
+    /** Flush any remaining buffered samples and signal end of audio. */
+    fun finishFileTranscription() {
+        pipeline.flush()
+        _statusText.value = "Translating…"
+    }
+
     fun destroy() {
         // Save gemini ref before stop() nulls it
         val g = gemini
