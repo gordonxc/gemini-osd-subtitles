@@ -41,34 +41,44 @@ class SubtitleBuffer {
     @Volatile private var activeLine = false
     private var pauseJob: Job? = null
 
+    /// Guards `displayed`, `activeLine`, and `pauseJob`. `append`/`reset` run
+    /// on GeminiClient's receive dispatcher while the pause timer runs on
+    /// `Dispatchers.Default`; without this lock the two can interleave and
+    /// throw ConcurrentModificationException (or produce torn line state).
+    private val lock = Any()
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** Append a new transcription fragment. Splits on any sentence-ender. */
     fun append(fragment: String) {
-        pauseJob?.cancel()
+        synchronized(lock) {
+            pauseJob?.cancel()
 
-        for (ch in fragment) {
-            if (!activeLine) {
-                displayed.add("")
-                if (displayed.size > maxLines) displayed.removeAt(0)
-                activeLine = true
+            for (ch in fragment) {
+                if (!activeLine) {
+                    displayed.add("")
+                    if (displayed.size > maxLines) displayed.removeAt(0)
+                    activeLine = true
+                }
+                displayed[displayed.lastIndex] = displayed[displayed.lastIndex] + ch
+                if (ch in sentenceEnders) {
+                    activeLine = false
+                }
             }
-            displayed[displayed.lastIndex] = displayed[displayed.lastIndex] + ch
-            if (ch in sentenceEnders) {
-                activeLine = false
-            }
+
+            emit()
+            schedulePauseTimer()
         }
-
-        emit()
-        schedulePauseTimer()
     }
 
     /** Clear all state (used on stop). */
     fun reset() {
-        pauseJob?.cancel()
-        displayed.clear()
-        activeLine = false
-        emit()
+        synchronized(lock) {
+            pauseJob?.cancel()
+            displayed.clear()
+            activeLine = false
+            emit()
+        }
     }
 
     fun destroy() {
@@ -86,7 +96,7 @@ class SubtitleBuffer {
         pauseJob = scope.launch {
             delay(pauseTimeoutMs)
             // Pause detected — current line (if any) is now complete.
-            activeLine = false
+            synchronized(lock) { activeLine = false }
         }
     }
 }
