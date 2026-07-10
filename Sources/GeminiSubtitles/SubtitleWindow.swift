@@ -175,7 +175,7 @@ final class SubtitleWindow: NSPanel {
 
         // Available vertical space from the bottom anchor to a top margin.
         let availableHeight: CGFloat = {
-            guard let screen = NSScreen.main else { return 600 }
+            guard let screen = positioningScreen else { return 600 }
             return screen.visibleFrame.height
                 - SubtitleWindow.bottomAnchor
                 - SubtitleWindow.topMargin
@@ -205,7 +205,7 @@ final class SubtitleWindow: NSPanel {
         // Width: screen-relative with margin, capped at 1200pt (Q5).
         let preferredWidth = Int(size * 36)
         let maxWidth: Int = {
-            guard let screen = NSScreen.main else { return 1600 }
+            guard let screen = positioningScreen else { return 1600 }
             let screenMax = Int(screen.visibleFrame.width) - Int(SubtitleWindow.widthMargin)
             return min(screenMax, Int(SubtitleWindow.widthCeiling))
         }()
@@ -239,10 +239,16 @@ final class SubtitleWindow: NSPanel {
         }
     }
 
-    /// Center horizontally on the main screen, anchored ~120 px above the
-    /// bottom of the visible frame.
+    /// Center horizontally on the primary screen (the one with the menu
+    /// bar), anchored ~120 px above the bottom of the visible frame.
+    ///
+    /// Uses `NSScreen.screens.first` rather than `NSScreen.main` — the
+    /// latter tracks the screen containing the *currently focused window*,
+    /// which for a `.nonactivatingPanel` belongs to whatever app the user
+    /// is in, so it would center the OSD on whichever display that app's
+    /// key window happens to be on instead of the primary display.
     private func reposition() {
-        guard let screen = NSScreen.main else { return }
+        guard let screen = NSScreen.screens.first else { return }
         let visible = screen.visibleFrame
         let size = self.frame.size
         let x = visible.minX + (visible.width - size.width) / 2.0
@@ -254,17 +260,33 @@ final class SubtitleWindow: NSPanel {
 
     @objc private func screenParametersChanged(_ note: Notification) {
         // Display layout changed — recompute the line budget for the current
-        // font size and re-clamp the position to the new visible frame.
+        // font size, re-center horizontally on the OSD's current screen, and
+        // re-clamp the position to the new visible frame. Without the
+        // recenter, detaching an external display leaves the OSD wherever it
+        // was positioned on the old layout instead of centered on its screen.
         let size = subtitleView?.currentFontSize ?? SubtitleViewController.defaultSize
         resizeForFontSize(size)
+        recenterOnCurrentScreen()
         clampFrameToScreen(animated: false)
+    }
+
+    /// Center horizontally on the screen that contains the OSD's center,
+    /// preserving the vertical position. Falls back to the primary screen
+    /// when the center isn't on any display (e.g. the display it was on was
+    /// just disconnected).
+    private func recenterOnCurrentScreen() {
+        guard let screen = positioningScreen else { return }
+        let visible = screen.visibleFrame
+        var frame = self.frame
+        frame.origin.x = visible.minX + (visible.width - frame.width) / 2.0
+        setFrame(frame, display: true, animate: false)
     }
 
     /// Snap the frame back inside the visible frame if any edge is off-screen.
     /// If the window's center has been dragged entirely off-screen (rare but
     /// possible via multi-display layouts), reset to the default anchor.
     private func clampFrameToScreen(animated: Bool) {
-        guard let screen = screenContainingCenter ?? NSScreen.main else { return }
+        guard let screen = positioningScreen else { return }
         let visible = screen.visibleFrame
         var frame = self.frame
 
@@ -299,5 +321,13 @@ final class SubtitleWindow: NSPanel {
     private var screenContainingCenter: NSScreen? {
         let center = NSPoint(x: frame.midX, y: frame.midY)
         return NSScreen.screens.first { $0.frame.contains(center) }
+    }
+
+    /// Stable screen for geometry math: prefer the screen the OSD currently
+    /// sits on, fall back to the primary display (menu-bar screen). Use this
+    /// instead of `NSScreen.main`, which tracks the focused window's screen
+    /// and jumps around as the user switches apps.
+    private var positioningScreen: NSScreen? {
+        screenContainingCenter ?? NSScreen.screens.first
     }
 }
