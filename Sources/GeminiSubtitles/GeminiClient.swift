@@ -104,6 +104,12 @@ final class GeminiClient {
         pendingOriginal = nil
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
+        // Suppress the terminal .closed callback: the caller drove this stop
+        // and is already tearing down (its isStopping guard would no-op the
+        // re-entrant .closed anyway, but firing it also double-emits status).
+        // Genuine disconnects reach .closed via scheduleReconnectIfNeeded,
+        // not from here, so suppressing here doesn't affect that path.
+        onStatusChange = nil
         status = .closed
     }
 
