@@ -255,6 +255,15 @@ final class AppCoordinator {
             self?.gemini?.sendAudio(base64PCM: base64)
         }
 
+        // Wire the subtitle buffer → OSD *before* starting the client: a fast
+        // setup + first transcription frame could otherwise arrive and be
+        // dispatched to main (onTranscription → append → emit → onUpdate)
+        // before the assignment below ran, silently dropping the first line.
+        // onTranscription fires on main, so this assignment is thread-safe.
+        subtitleBuffer.onUpdate = { [weak self] text, original in
+            self?.scheduleTranscriptionUpdate(text, original: original)
+        }
+
         // Start Gemini first; audio kicks in once setup is complete.
         client.start()
 
@@ -265,9 +274,6 @@ final class AppCoordinator {
             let storedSize = UserDefaults.standard.integer(forKey: "com.gemini-subtitles.fontSize")
             if storedSize > 0 {
                 self.setSubtitleFontSize(CGFloat(storedSize))
-            }
-            self.subtitleBuffer.onUpdate = { [weak self] text, original in
-                self?.scheduleTranscriptionUpdate(text, original: original)
             }
             self.subtitleWindow.reveal()
         }
