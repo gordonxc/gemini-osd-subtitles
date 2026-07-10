@@ -41,6 +41,22 @@ ZIP_NAME="${APP_NAME}-v${VERSION}.zip"
 INFO_PLIST="Sources/GeminiSubtitles/Assets/Info.plist"
 APPCAST="appcast.xml"
 
+# Derive a monotonically increasing integer build number from the dotted
+# marketing version. Sparkle compares the appcast's <sparkle:version> against
+# the running app's CFBundleVersion (build number), so the build must be a
+# plain integer that grows every release. major*10000 + minor*100 + patch
+# leaves room for 99 patches per minor and 99 minors per major with no
+# collision: 0.9.9 -> 909, 0.9.10 -> 910, 0.10.0 -> 1000, 1.0.0 -> 10000.
+# Integers also outrank the legacy dotted versions ("0.9.x" < "1" < "910"),
+# which is what un-orphans older installs whose CFBundleVersion was "1".
+IFS='.' read -r _VMAJOR _VMINOR _VPATCH <<< "${VERSION}"
+_VMAJOR="${_VMAJOR:-0}"; _VMINOR="${_VMINOR:-0}"; _VPATCH="${_VPATCH:-0}"
+if ! [[ "$_VMAJOR" =~ ^[0-9]+$ && "$_VMINOR" =~ ^[0-9]+$ && "$_VPATCH" =~ ^[0-9]+$ ]]; then
+  echo "!! Version \"${VERSION}\" is not numeric major.minor.patch." >&2
+  exit 1
+fi
+BUILD=$(( _VMAJOR * 10000 + _VMINOR * 100 + _VPATCH ))
+
 # Locate sign_update. Prefer PATH, fall back to the SPM-extracted copy.
 SPARKLE_BIN="${SPARKLE_BIN:-}"
 SIGN_UPDATE=""
@@ -66,11 +82,11 @@ fi
 # macOS and avoids requiring a third-party Plist parser.
 #
 # Sparkle compares the appcast's <sparkle:version> against the running app's
-# CFBundleVersion (the build number), NOT CFBundleShortVersionString. We set
-# both to the marketing version so SUStandardVersionComparator sees a clean
-# monotonic ordering (e.g. "0.9.9" < "0.9.10"). If CFBundleVersion falls out
-# of sync, Sparkle silently thinks the running app is already newer and never
-# offers the update.
+# CFBundleVersion (the build number), NOT CFBundleShortVersionString. We keep
+# CFBundleShortVersionString as the marketing version (shown to users) and
+# CFBundleVersion as a monotonic integer build number (used by Sparkle for
+# update detection). The appcast item carries both via <sparkle:version>
+# (build) and <sparkle:shortVersionString> (marketing).
 PLIST_VERSION="$(plutil -extract CFBundleShortVersionString raw "$INFO_PLIST")"
 if [[ "$PLIST_VERSION" != "$VERSION" ]]; then
   echo "!! Info.plist CFBundleShortVersionString is \"${PLIST_VERSION}\"," >&2
@@ -79,11 +95,12 @@ if [[ "$PLIST_VERSION" != "$VERSION" ]]; then
   exit 1
 fi
 PLIST_BUILD="$(plutil -extract CFBundleVersion raw "$INFO_PLIST")"
-if [[ "$PLIST_BUILD" != "$VERSION" ]]; then
+if [[ "$PLIST_BUILD" != "$BUILD" ]]; then
   echo "!! Info.plist CFBundleVersion is \"${PLIST_BUILD}\"," >&2
-  echo "!! but you asked to publish \"${VERSION}\"." >&2
+  echo "!! but the derived build number for \"${VERSION}\" is \"${BUILD}\"." >&2
   echo "!! Sparkle compares <sparkle:version> against CFBundleVersion, so it" >&2
-  echo "!! MUST equal CFBundleShortVersionString. Fix it in $INFO_PLIST." >&2
+  echo "!! must be the integer build number. Set CFBundleVersion=${BUILD} in" >&2
+  echo "!! $INFO_PLIST." >&2
   exit 1
 fi
 
@@ -140,16 +157,15 @@ fi
 xmllint --noout "$APPCAST"
 
 # If an entry for this version already exists, drop it first so republishing
-# is idempotent.
-python3 - "$APPCAST" "$VERSION" <<'PY'
+# is idempotent. Match by the integer build number in <sparkle:version>.
+python3 - "$APPCAST" "$BUILD" <<'PY'
 import re, sys
-path, version = sys.argv[1], sys.argv[2]
+path, build = sys.argv[1], sys.argv[2]
 with open(path, "r", encoding="utf-8") as f:
     xml = f.read()
-# Remove any existing <item> whose sparkle:version matches this version.
 pattern = re.compile(
     r'<item>\s*<title>(?:(?!</title>).)*?</title>\s*'
-    r'<sparkle:version>%s</sparkle:version>.*?</item>\s*' % re.escape(version),
+    r'<sparkle:version>%s</sparkle:version>.*?</item>\s*' % re.escape(build),
     re.DOTALL)
 xml = pattern.sub('', xml)
 with open(path, "w", encoding="utf-8") as f:
@@ -160,12 +176,14 @@ PY
 PUB_DATE="$(date -R)"
 
 # Compose the new <item>. Sparkle requires: enclosure url + length + signature;
-# sparkle:version must be unique and monotonic for the upgrade check.
+# <sparkle:version> (build number) must be unique and monotonic for the upgrade
+# check; <sparkle:shortVersionString> is the user-facing marketing version.
 NEW_ITEM="$(cat <<EOF
         <item>
             <title>Version ${VERSION}</title>
             <pubDate>${PUB_DATE}</pubDate>
-            <sparkle:version>${VERSION}</sparkle:version>
+            <sparkle:version>${BUILD}</sparkle:version>
+            <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
             <sparkle:edSignature>${ED_SIGNATURE}</sparkle:edSignature>
             <description><![CDATA[${NOTES}]]></description>
             <enclosure
