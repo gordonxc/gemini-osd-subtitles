@@ -257,10 +257,13 @@ final class GeminiClient {
             // translation frame, then clear it so the next input frame starts
             // fresh. This is what makes bilingual mode actually display the
             // original — input and output arrive as separate frames.
-            let original = pendingOriginal
+            // Gate on `bilingual`: the server can emit inputTranscription
+            // frames even when not requested via setup, so the flag is the
+            // authoritative guard for whether the original reaches the OSD.
+            let original = bilingual ? pendingOriginal : nil
             pendingOriginal = nil
             onTranscription?(event.text, event.isFinal, original)
-        } else if let inputText = GeminiProtocol.parseInputTranscription(from: json) {
+        } else if bilingual, let inputText = GeminiProtocol.parseInputTranscription(from: json) {
             // Input-only frame: stash for the next output frame. Overwrite
             // any prior pending text because Gemini emits growing fragments
             // and the latest one is the most complete for the current segment.
