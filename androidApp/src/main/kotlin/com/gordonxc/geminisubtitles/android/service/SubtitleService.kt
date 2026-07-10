@@ -270,6 +270,15 @@ class SubtitleService : Service(), PlatformNotifier {
             } catch (e: Exception) {
                 DebugLog.write("SubtitleService file transcription FAILED: ${e.message}")
                 statusText.value = "Error: ${e.message}"
+                // Mirror the success-path teardown: without this, a decode
+                // failure (unsupported codec, unreadable URI, no audio track)
+                // leaves isTranscribing stuck true, the Gemini WebSocket open,
+                // and the foreground notification undying — only a force-stop
+                // could clear it.
+                isTranscribing.value = false
+                runCatching { coord.stop() }
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
             }
         }
     }
