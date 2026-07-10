@@ -13,7 +13,23 @@
         <link>https://github.com/gordonxc/gemini-osd-subtitles</link>
         <description>Release feed for Gemini Subtitles</description>
         <language>en</language>
-                                        <item>
+                                                <item>
+            <title>Version 0.9.5</title>
+            <pubDate>Fri, 10 Jul 2026 21:08:25 +0100</pubDate>
+            <sparkle:version>0.9.5</sparkle:version>
+            <sparkle:edSignature>Z3GyTI2jysKdyqvdN8X7i5FzBSVWRS2M+OcHPlUR+zhetihz7hdIx4zBAEFhwMfBtyGNJkXSY15dknFifNozBg==</sparkle:edSignature>
+            <description><![CDATA[Bug-fix release covering Android capture-lifecycle issues:
+
+Android:
+- File-transcription decode failures no longer wedge the foreground service — the catch block now tears down the coordinator, notification, and service (was stuck until force-stop).
+- AudioRecord + MediaProjection are now released immediately on a fatal capture-loop read error, instead of leaking until a manual stop. For MediaProjection this also avoids holding the screen-capture grant and the Android 14 foreground-service-type coupling violation.]]></description>
+            <enclosure
+                url="https://github.com/gordonxc/gemini-osd-subtitles/releases/download/v0.9.5/GeminiSubtitles-v0.9.5.zip"
+                sparkle:edSignature="Z3GyTI2jysKdyqvdN8X7i5FzBSVWRS2M+OcHPlUR+zhetihz7hdIx4zBAEFhwMfBtyGNJkXSY15dknFifNozBg=="
+                length="1270111"
+                type="application/octet-stream" />
+        </item>
+        <item>
             <title>Version 0.9.3</title>
             <pubDate>Fri, 10 Jul 2026 20:26:02 +0100</pubDate>
             <sparkle:version>0.9.3</sparkle:version>
