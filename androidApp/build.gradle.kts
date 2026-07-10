@@ -13,8 +13,8 @@ android {
         applicationId = "com.gordonxc.geminisubtitles"
         minSdk = 29
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.9.2"
+        versionCode = 4
+        versionName = "0.9.3"
     }
 
     buildFeatures {
