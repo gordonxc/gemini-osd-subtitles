@@ -64,11 +64,26 @@ fi
 # --- 1. Version sanity check --------------------------------------------------
 # Fail fast if the user forgot to bump Info.plist. Plutil is preinstalled on
 # macOS and avoids requiring a third-party Plist parser.
+#
+# Sparkle compares the appcast's <sparkle:version> against the running app's
+# CFBundleVersion (the build number), NOT CFBundleShortVersionString. We set
+# both to the marketing version so SUStandardVersionComparator sees a clean
+# monotonic ordering (e.g. "0.9.9" < "0.9.10"). If CFBundleVersion falls out
+# of sync, Sparkle silently thinks the running app is already newer and never
+# offers the update.
 PLIST_VERSION="$(plutil -extract CFBundleShortVersionString raw "$INFO_PLIST")"
 if [[ "$PLIST_VERSION" != "$VERSION" ]]; then
   echo "!! Info.plist CFBundleShortVersionString is \"${PLIST_VERSION}\"," >&2
   echo "!! but you asked to publish \"${VERSION}\"." >&2
   echo "!! Bump the version in $INFO_PLIST first." >&2
+  exit 1
+fi
+PLIST_BUILD="$(plutil -extract CFBundleVersion raw "$INFO_PLIST")"
+if [[ "$PLIST_BUILD" != "$VERSION" ]]; then
+  echo "!! Info.plist CFBundleVersion is \"${PLIST_BUILD}\"," >&2
+  echo "!! but you asked to publish \"${VERSION}\"." >&2
+  echo "!! Sparkle compares <sparkle:version> against CFBundleVersion, so it" >&2
+  echo "!! MUST equal CFBundleShortVersionString. Fix it in $INFO_PLIST." >&2
   exit 1
 fi
 
