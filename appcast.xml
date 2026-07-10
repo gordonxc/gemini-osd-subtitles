@@ -13,7 +13,23 @@
         <link>https://github.com/gordonxc/gemini-osd-subtitles</link>
         <description>Release feed for Gemini Subtitles</description>
         <language>en</language>
-                                <item>
+                                        <item>
+            <title>Version 0.9.3</title>
+            <pubDate>Fri, 10 Jul 2026 20:26:02 +0100</pubDate>
+            <sparkle:version>0.9.3</sparkle:version>
+            <sparkle:edSignature>rifB/DO6Ju2hDyTg9OVpgnH25h6z/XOzUXXpAtTezQc1TKBWdw1zpSEipH9YZkj37LG4ZOxEh1EYYTyn0c/fCg==</sparkle:edSignature>
+            <description><![CDATA[Bug-fix release covering two macOS issues:
+
+macOS:
+- OSD sometimes centered on the wrong display — NSScreen.main tracks the focused app's screen rather than the OSD's, so the overlay could land on whichever display another app's key window was on. Now anchors to the OSD's own screen (falling back to the primary display) and re-centers after display-layout changes.
+- Bilingual original line leaked through when the setting was off — the server can emit input transcription frames even when not requested, so the source-language line kept showing after toggling Bilingual off. The user's setting is now the authoritative guard.]]></description>
+            <enclosure
+                url="https://github.com/gordonxc/gemini-osd-subtitles/releases/download/v0.9.3/GeminiSubtitles-v0.9.3.zip"
+                sparkle:edSignature="rifB/DO6Ju2hDyTg9OVpgnH25h6z/XOzUXXpAtTezQc1TKBWdw1zpSEipH9YZkj37LG4ZOxEh1EYYTyn0c/fCg=="
+                length="1269530"
+                type="application/octet-stream" />
+        </item>
+        <item>
             <title>Version 0.9.2</title>
             <pubDate>Thu, 25 Jun 2026 10:11:57 +0100</pubDate>
             <sparkle:version>0.9.2</sparkle:version>
