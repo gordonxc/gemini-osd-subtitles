@@ -27,6 +27,7 @@ final class AppCoordinator {
     enum StopReason {
         case userRequested
         case languageChanged
+        case disconnected
     }
 
     /// Which audio input to capture from.
@@ -68,6 +69,9 @@ final class AppCoordinator {
     private var currentTargetLanguage: String = Languages.defaultCode
     private var currentAudioSource: AudioSource = .system(audioSourceUID: nil)
     private var currentBilingual: Bool = false
+
+    /// Re-entrancy guard for stop(); see stop(reason:).
+    private var isStopping = false
 
     /// User-defaults key for the bilingual OSD toggle.
     private let bilingualUDKey = "com.gemini-subtitles.bilingual"
@@ -298,6 +302,13 @@ final class AppCoordinator {
     }
 
     func stop(reason: StopReason) {
+        // Re-entrancy guard: GeminiClient.stop() fires onStatusChange(.closed)
+        // synchronously, which (for the disconnected case below) re-enters
+        // stop(). Without this guard the inner call would nil out capture /
+        // micCapture / gemini mid-teardown. The flag is reset on return.
+        guard !isStopping else { return }
+        isStopping = true
+        defer { isStopping = false }
         capture?.stop()
         capture = nil
         micCapture?.stop()
@@ -323,7 +334,11 @@ final class AppCoordinator {
         // one (e.g. on language change).
         history.endSession()
         runState = .stopped
-        lastStatusText = reason == .languageChanged ? "Switching language…" : "Stopped"
+        switch reason {
+        case .languageChanged: lastStatusText = "Switching language…"
+        case .disconnected:    lastStatusText = "Disconnected"
+        case .userRequested:   lastStatusText = "Stopped"
+        }
     }
 
     // MARK: Callbacks
@@ -482,9 +497,15 @@ final class AppCoordinator {
                 lastStatusText = "Reconnecting…"
             }
         case .closed:
-            if runState != .stopped {
-                runState = .stopped
-                lastStatusText = "Disconnected"
+            // A terminal close arrived that wasn't driven by our own stop()
+            // (user stop / language change set isStopping, which makes the
+            // inner stop() below a no-op so the outer teardown continues).
+            // This is the reconnect-exhausted path: without a full teardown
+            // here, audio capture keeps running on a dead socket and the
+            // overlay shows stale text, burning battery. Calling stop()
+            // performs the full cleanup and sets status to "Disconnected".
+            if runState != .stopped && !isStopping {
+                stop(reason: .disconnected)
             }
         case .idle:
             break
