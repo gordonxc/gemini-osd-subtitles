@@ -45,11 +45,12 @@ class GeminiClient(
     private val endpointUrl =
         "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 
+    @Volatile
     private var status: Status = Status.IDLE
         set(value) { field = value; onStatusChange?.invoke(value) }
 
-    private var setupComplete = false
-    private var running = false
+    @Volatile private var setupComplete = false
+    @Volatile private var running = false
     private var consecutiveReconnectFailures = 0
     private var audioChunksSent = 0UL
 
