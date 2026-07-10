@@ -165,6 +165,10 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         menu.addItem(osdLock)
         osdLockItem = osdLock
 
+        let resetPosition = NSMenuItem(title: "Reset OSD Position", action: #selector(resetOSDPosition), keyEquivalent: "")
+        resetPosition.target = self
+        menu.addItem(resetPosition)
+
         let apiKey = NSMenuItem(title: "Set API Key…", action: #selector(presentAPIKeyAlert), keyEquivalent: "")
         apiKey.target = self
         menu.addItem(apiKey)
@@ -321,6 +325,10 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         // When locked → click-through; show "Unlock" label.
         // When unlocked → draggable; show "Lock" label.
         osdLockItem?.title = locked ? "Unlock OSD to Move" : "Lock OSD"
+    }
+
+    @objc private func resetOSDPosition() {
+        coordinator?.resetOSDPosition()
     }
 
     @objc private func quit() {

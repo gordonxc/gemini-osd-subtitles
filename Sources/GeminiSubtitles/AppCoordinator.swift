@@ -403,6 +403,13 @@ final class AppCoordinator {
         return subtitleWindow.locked
     }
 
+    /// Snap the OSD back to its default bottom-center position on the
+    /// primary screen. No-op effect on content; only the window origin
+    /// is restored.
+    func resetOSDPosition() {
+        subtitleWindow.resetPosition()
+    }
+
     /// Apply a new font size to the OSD subtitle text.
     func setSubtitleFontSize(_ size: CGFloat) {
         subtitleWindow.resizeForFontSize(size)

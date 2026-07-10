@@ -256,6 +256,13 @@ final class SubtitleWindow: NSPanel {
         setFrameOrigin(NSPoint(x: x, y: y))
     }
 
+    /// Restore the OSD to the default bottom-center placement on the
+    /// primary screen. Public so the menu can expose it as "Reset OSD
+    /// Position" after the user has dragged the window elsewhere.
+    func resetPosition() {
+        reposition()
+    }
+
     // MARK: Drag clamp (design Q7)
 
     @objc private func screenParametersChanged(_ note: Notification) {
