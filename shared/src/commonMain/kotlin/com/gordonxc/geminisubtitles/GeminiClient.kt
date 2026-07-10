@@ -12,6 +12,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -57,7 +59,20 @@ class GeminiClient(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var sessionJob: Job? = null
-    private var currentSession: DefaultClientWebSocketSession? = null
+    @Volatile private var currentSession: DefaultClientWebSocketSession? = null
+
+    /// Outbound audio queue. A single long-running consumer (`sendJob`)
+    /// drains it and sends on `currentSession`, which (a) guarantees FIFO
+    /// ordering — per-chunk `scope.launch` could deliver out of order under
+    /// backpressure — and (b) bounds memory: `DROP_OLDEST` caps the buffer
+    /// instead of letting a slow connection pile up one coroutine per chunk.
+    /// Real-time audio at 10 Hz with capacity 100 ≈ 10 s headroom; beyond
+    /// that we drop the oldest (most stale) chunk rather than grow unbounded.
+    private val sendChannel = Channel<String>(
+        capacity = 100,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    private var sendJob: Job? = null
 
     val isReady: Boolean get() = status == Status.READY && setupComplete
 
@@ -67,6 +82,7 @@ class GeminiClient(
         if (running) return
         running = true
         consecutiveReconnectFailures = 0
+        sendJob = scope.launch { drainSendChannel() }
         openConnection()
     }
 
@@ -76,6 +92,8 @@ class GeminiClient(
         sessionJob?.cancel()
         sessionJob = null
         currentSession = null
+        sendJob?.cancel()
+        sendJob = null
         status = Status.CLOSED
     }
 
@@ -92,12 +110,28 @@ class GeminiClient(
             DebugLog.write("GeminiClient.sendAudio #$audioChunksSent (${base64PCM.length} b64 chars)")
         }
         val payload = GeminiProtocol.encodeJson(GeminiProtocol.realtimeAudioMessage(base64PCM))
-        scope.launch {
+        // Non-blocking enqueue; the drain coroutine handles the actual send.
+        // trySend returns false only when the buffer is full AND DROP_OLDEST
+        // couldn't make room (shouldn't happen with DROP policy, but guard).
+        val result = sendChannel.trySend(payload)
+        if (result.isFailure) {
+            DebugLog.write("GeminiClient.sendAudio buffer full, dropped chunk")
+        }
+    }
+
+    /// Single consumer for `sendChannel`. Pulls payloads in FIFO order and
+    /// sends on `currentSession`. Runs for the lifetime of the client
+    /// (launched in start, cancelled in stop). A null session means the
+    /// socket is mid-(re)connect — drop the chunk rather than block, since
+    /// real-time audio loses value while queued behind a reconnect.
+    private suspend fun drainSendChannel() {
+        for (payload in sendChannel) {
             try {
                 currentSession?.send(Frame.Text(payload))
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                DebugLog.write("GeminiClient.sendAudio FAILED: ${e.message}")
+                DebugLog.write("GeminiClient sender FAILED: ${e.message}")
             }
         }
     }
