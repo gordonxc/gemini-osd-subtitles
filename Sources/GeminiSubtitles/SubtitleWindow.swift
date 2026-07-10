@@ -61,7 +61,11 @@ final class SubtitleWindow: NSPanel {
         hasShadow = false
         isMovableByWindowBackground = true
         level = .floating
-        collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        // `.fullScreenAuxiliary` lets the OSD appear on top of an app's
+        // fullscreen Space. Without it, `.canJoinAllSpaces` only spans
+        // regular Spaces — when a video player goes fullscreen (its own
+        // dedicated Space), the overlay stays on the desktop and is hidden.
+        collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
         // Locked by default: click-through so the OSD never blocks the app
