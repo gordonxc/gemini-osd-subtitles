@@ -74,6 +74,15 @@ final class AudioCapture: NSObject, SCStreamDelegate {
                         DebugLog.write("AudioCapture: restricting capture to app \(bid)")
                     }
                 }
+                // Guard against stop() having fired while we awaited
+                // shareable content. Without this, the stream we're about
+                // to create would be assigned to self.stream after stop()
+                // already ran (and found stream nil), leaving a runaway
+                // capture that nobody can stop.
+                guard self.running else {
+                    DebugLog.write("AudioCapture: stopped before stream could start, aborting")
+                    return
+                }
                 self.startStream(for: display, including: targetApp)
             } catch {
                 DebugLog.write("AudioCapture SCShareableContent error: \(error.localizedDescription)")
@@ -86,6 +95,10 @@ final class AudioCapture: NSObject, SCStreamDelegate {
     }
 
     private func startStream(for display: SCDisplay, including app: SCRunningApplication?) {
+        guard running else {
+            DebugLog.write("AudioCapture.startStream: stopped before entry, aborting")
+            return
+        }
         let filter: SCContentFilter
         if let app {
             // macOS 14+: a content filter restricted to specific running
@@ -122,6 +135,10 @@ final class AudioCapture: NSObject, SCStreamDelegate {
             guard let self else { return }
             if let error {
                 DebugLog.write("AudioCapture startCapture FAILED: \(error.localizedDescription)")
+                // Clean up the stream reference so stop() doesn't call
+                // stopCapture on an already-failed stream, and so a
+                // subsequent start() doesn't see a stale stream.
+                self.stream = nil
                 self.running = false
                 self.onError?(error)
                 return
