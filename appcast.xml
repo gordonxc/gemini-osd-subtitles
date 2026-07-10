@@ -13,6 +13,19 @@
         <link>https://github.com/gordonxc/gemini-osd-subtitles</link>
         <description>Release feed for Gemini Subtitles</description>
         <language>en</language>
+                <item>
+            <title>Version 0.9.10</title>
+            <pubDate>Fri, 10 Jul 2026 22:04:48 +0100</pubDate>
+            <sparkle:version>910</sparkle:version>
+            <sparkle:shortVersionString>0.9.10</sparkle:shortVersionString>
+            <sparkle:edSignature>/I0zygnjTpmxB4O1ctNnEVrC2Fl50A/j5PoJAGDfive22ojGX0sFnsm6ACO0tiMW/SE76KkKamff9NQFpUM1Cg==</sparkle:edSignature>
+            <description><![CDATA[New: Reset OSD Position menu item — snap the OSD back to its default bottom-center placement after dragging it elsewhere.]]></description>
+            <enclosure
+                url="https://github.com/gordonxc/gemini-osd-subtitles/releases/download/v0.9.10/GeminiSubtitles-v0.9.10.zip"
+                sparkle:edSignature="/I0zygnjTpmxB4O1ctNnEVrC2Fl50A/j5PoJAGDfive22ojGX0sFnsm6ACO0tiMW/SE76KkKamff9NQFpUM1Cg=="
+                length="1270515"
+                type="application/octet-stream" />
+        </item>
         <item>
             <title>Version 0.9.9</title>
             <pubDate>Fri, 10 Jul 2026 21:26:50 +0100</pubDate>
