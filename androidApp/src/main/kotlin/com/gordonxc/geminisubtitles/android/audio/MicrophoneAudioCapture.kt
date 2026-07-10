@@ -79,12 +79,19 @@ class MicrophoneAudioCapture : PlatformAudioCapture {
         running = false
         captureThread?.join(500)
         captureThread = null
+        releaseAudioRecord()
+        DebugLog.write("MicrophoneAudioCapture: stopped")
+    }
+
+    /// Stop + release the AudioRecord. Called from stop() (after joining the
+    /// capture thread) and from captureLoop's fatal-error path. Safe to call
+    /// twice — the second invocation finds audioRecord null and no-ops.
+    private fun releaseAudioRecord() {
         try {
             audioRecord?.stop()
             audioRecord?.release()
         } catch (_: Exception) {}
         audioRecord = null
-        DebugLog.write("MicrophoneAudioCapture: stopped")
     }
 
     private fun captureLoop(record: AudioRecord) {
@@ -100,6 +107,14 @@ class MicrophoneAudioCapture : PlatformAudioCapture {
                     read == AudioRecord.ERROR_BAD_VALUE
                 ) {
                     DebugLog.write("MicrophoneAudioCapture: read error $read")
+                    // Release the hardware now rather than waiting for the
+                    // user to press stop: handleAudioError only flips state
+                    // to ERROR, so without this the AudioRecord stays in
+                    // RECORDING and holds the mic until a manual stop.
+                    // We can't call public stop() here — it joins the
+                    // capture thread we're currently running on.
+                    running = false
+                    releaseAudioRecord()
                     onError?.invoke(RuntimeException("AudioRecord.read returned $read"))
                     break
                 }

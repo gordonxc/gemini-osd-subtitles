@@ -87,25 +87,33 @@ class MediaProjectionAudioCapture(
         running = false
         captureThread?.join(500)
         captureThread = null
+        releaseCaptureHardware()
+        DebugLog.write("MediaProjectionAudioCapture: stopped")
+    }
+
+    /// Stop + release the AudioRecord and the MediaProjection token. Called
+    /// from stop() (after joining the capture thread) and from captureLoop's
+    /// fatal-error path. Safe to call twice — subsequent calls find the
+    /// resources already released and no-op (mediaProjection.stop() throws
+    /// if already stopped, which is caught).
+    private fun releaseCaptureHardware() {
         try {
             audioRecord?.stop()
             audioRecord?.release()
         } catch (e: Exception) {
-            DebugLog.write("MediaProjectionAudioCapture.stop: audioRecord cleanup error: ${e.message}")
+            DebugLog.write("MediaProjectionAudioCapture: audioRecord cleanup error: ${e.message}")
         }
         audioRecord = null
         // Release the MediaProjection token so the system knows we're done
         // capturing. Without this the projection stays active (holding the
         // user's screen-capture grant) and on Android 14+ violates the
         // foreground-service-type coupling rule, risking the system killing
-        // the app. stop() is safe to call after the projection is no longer
-        // in use; the framework tears down the virtual display.
+        // the app.
         try {
             mediaProjection.stop()
         } catch (e: Exception) {
-            DebugLog.write("MediaProjectionAudioCapture.stop: mediaProjection.stop error: ${e.message}")
+            DebugLog.write("MediaProjectionAudioCapture: mediaProjection.stop error: ${e.message}")
         }
-        DebugLog.write("MediaProjectionAudioCapture: stopped")
     }
 
     private fun captureLoop(record: AudioRecord) {
@@ -121,6 +129,15 @@ class MediaProjectionAudioCapture(
                     read == AudioRecord.ERROR_BAD_VALUE
                 ) {
                     DebugLog.write("MediaProjectionAudioCapture: read error $read")
+                    // Release the capture hardware now rather than waiting
+                    // for the user to press stop: handleAudioError only
+                    // flips state to ERROR, so without this the AudioRecord
+                    // stays in RECORDING and the MediaProjection grant
+                    // stays active (Android 14+ FGS coupling risk) until a
+                    // manual stop. We can't call public stop() here — it
+                    // joins the capture thread we're currently running on.
+                    running = false
+                    releaseCaptureHardware()
                     onError?.invoke(RuntimeException("AudioRecord.read returned $read"))
                     break
                 }
