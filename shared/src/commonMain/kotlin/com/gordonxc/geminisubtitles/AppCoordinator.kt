@@ -176,6 +176,15 @@ class AppCoordinator(
     }
 
     private fun handleGeminiError(error: Throwable) {
+        // Stop audio capture and Gemini on fatal errors (reconnect exhausted,
+        // unauthorized, setup timeout). Without this, audio capture keeps
+        // running on a dead WebSocket — wasting battery and holding the
+        // MediaProjection/microphone grant with no indication to the user.
+        audioCapture.stop()
+        gemini?.stop()
+        gemini = null
+        pipeline.reset()
+
         _state.value = RunState.ERROR
         _statusText.value = "Error: ${error.message}"
         notifier.notify("Gemini Subtitles error", error.message ?: "Unknown error")
@@ -185,6 +194,13 @@ class AppCoordinator(
         val isPermissionError = error.message?.lowercase()?.let {
             it.contains("permission") || it.contains("not authorized") || it.contains("denied")
         } ?: false
+
+        // Stop the Gemini client since no audio will flow — without this the
+        // WebSocket stays open consuming resources while the user stares at an
+        // error.
+        gemini?.stop()
+        gemini = null
+        pipeline.reset()
 
         _state.value = RunState.ERROR
         _statusText.value = if (isPermissionError) {
