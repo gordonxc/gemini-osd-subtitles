@@ -13,30 +13,6 @@
         <link>https://github.com/gordonxc/gemini-osd-subtitles</link>
         <description>Release feed for Gemini Subtitles</description>
         <language>en</language>
-                                                                                <item>
-            <title>Version 0.9.10</title>
-            <pubDate>Fri, 10 Jul 2026 21:50:43 +0100</pubDate>
-            <sparkle:version>0.9.10</sparkle:version>
-            <sparkle:edSignature>E+dmpOOTkUPzGNIsLG6ox1+VkRCTXbPMmRpk+n/leS2qYvqCN9bW54sz8tymXyRBRhKCQA2kqOzc/LKRFri3BQ==</sparkle:edSignature>
-            <description><![CDATA[New: Reset OSD Position menu item — snap the OSD back to its default bottom-center placement after dragging it elsewhere.]]></description>
-            <enclosure
-                url="https://github.com/gordonxc/gemini-osd-subtitles/releases/download/v0.9.10/GeminiSubtitles-v0.9.10.zip"
-                sparkle:edSignature="E+dmpOOTkUPzGNIsLG6ox1+VkRCTXbPMmRpk+n/leS2qYvqCN9bW54sz8tymXyRBRhKCQA2kqOzc/LKRFri3BQ=="
-                length="1270531"
-                type="application/octet-stream" />
-        </item>
-        <item>
-            <title>Version 0.9.10</title>
-            <pubDate>Fri, 10 Jul 2026 21:37:59 +0100</pubDate>
-            <sparkle:version>0.9.10</sparkle:version>
-            <sparkle:edSignature>zMibcPIaNj1cqB+YJ3B95NMjBxYs4ye+r684soIaC00yu5AzqdcUd/4cU0HjXtS9FgOHziysM3psTp6q2VI/Cw==</sparkle:edSignature>
-            <description><![CDATA[New: Reset OSD Position menu item — snap the OSD back to its default bottom-center placement after dragging it elsewhere.]]></description>
-            <enclosure
-                url="https://github.com/gordonxc/gemini-osd-subtitles/releases/download/v0.9.10/GeminiSubtitles-v0.9.10.zip"
-                sparkle:edSignature="zMibcPIaNj1cqB+YJ3B95NMjBxYs4ye+r684soIaC00yu5AzqdcUd/4cU0HjXtS9FgOHziysM3psTp6q2VI/Cw=="
-                length="1270529"
-                type="application/octet-stream" />
-        </item>
         <item>
             <title>Version 0.9.9</title>
             <pubDate>Fri, 10 Jul 2026 21:26:50 +0100</pubDate>

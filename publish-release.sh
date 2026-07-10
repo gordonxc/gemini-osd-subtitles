@@ -156,20 +156,31 @@ if [[ ! -f "$APPCAST" ]]; then
 fi
 xmllint --noout "$APPCAST"
 
-# If an entry for this version already exists, drop it first so republishing
+# If an entry for this build already exists, drop it first so republishing
 # is idempotent. Match by the integer build number in <sparkle:version>.
 python3 - "$APPCAST" "$BUILD" <<'PY'
 import re, sys
 path, build = sys.argv[1], sys.argv[2]
 with open(path, "r", encoding="utf-8") as f:
     xml = f.read()
+# Only touch content AFTER the last XML comment close — the header comment
+# contains literal "<item>" tokens that would otherwise match.
+search_start = 0
+last_comment_end = xml.rfind("-->")
+if last_comment_end != -1:
+    search_start = last_comment_end + 3
+head, body = xml[:search_start], xml[search_start:]
+# Remove any <item>...</item> block (plus trailing whitespace) containing
+# this build's sparkle:version. We don't assume <sparkle:version> immediately
+# follows </title> (pubDate sits between them).
 pattern = re.compile(
-    r'<item>\s*<title>(?:(?!</title>).)*?</title>\s*'
-    r'<sparkle:version>%s</sparkle:version>.*?</item>\s*' % re.escape(build),
+    r'<item>.*?<sparkle:version>%s</sparkle:version>.*?</item>\s*'
+    % re.escape(build),
     re.DOTALL)
-xml = pattern.sub('', xml)
+body, n = pattern.subn('', body)
 with open(path, "w", encoding="utf-8") as f:
-    f.write(xml)
+    f.write(head + body)
+print(f"   dedup: removed {n} prior item(s) for build {build}")
 PY
 
 # Determine today's date for <pubDate> (RFC 822).
