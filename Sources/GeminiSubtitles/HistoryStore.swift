@@ -166,6 +166,12 @@ final class HistoryStore {
         currentSessionStart = nil
         currentLanguageCode = nil
         currentEntries = []
+        // Drop the live-append subscriber: it points at a viewer window for
+        // the session that just closed. Without this, new-session entries
+        // would be delivered to the old (possibly deallocated → swallowed)
+        // viewer, and a viewer opened for the new session would get nothing
+        // because its subscribeIfNeeded replaced a stale closure.
+        onAppend = nil
     }
 
     // MARK: Listing / loading
