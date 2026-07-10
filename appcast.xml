@@ -13,7 +13,23 @@
         <link>https://github.com/gordonxc/gemini-osd-subtitles</link>
         <description>Release feed for Gemini Subtitles</description>
         <language>en</language>
-                                                <item>
+                                                        <item>
+            <title>Version 0.9.8</title>
+            <pubDate>Fri, 10 Jul 2026 21:23:58 +0100</pubDate>
+            <sparkle:version>0.9.8</sparkle:version>
+            <sparkle:edSignature>0YyuTlqf30NA5tLzZ+THdKX5nQg41MCTJvP7zl4PGoLKuLwrfSERFjVnF/C0BZUTvwfwCbTErtyheCXX3KMbDw==</sparkle:edSignature>
+            <description><![CDATA[Bug-fix release covering resource leaks and concurrency fixes across macOS and shared KMP core:
+
+- fix(macos): guard against leaked SCStream on rapid start/stop
+- fix(shared): add @Volatile to GeminiClient cross-thread state fields
+- fix(shared): stop audio capture and Gemini on fatal errors]]></description>
+            <enclosure
+                url="https://github.com/gordonxc/gemini-osd-subtitles/releases/download/v0.9.8/GeminiSubtitles-v0.9.8.zip"
+                sparkle:edSignature="0YyuTlqf30NA5tLzZ+THdKX5nQg41MCTJvP7zl4PGoLKuLwrfSERFjVnF/C0BZUTvwfwCbTErtyheCXX3KMbDw=="
+                length="1270320"
+                type="application/octet-stream" />
+        </item>
+        <item>
             <title>Version 0.9.5</title>
             <pubDate>Fri, 10 Jul 2026 21:08:25 +0100</pubDate>
             <sparkle:version>0.9.5</sparkle:version>
