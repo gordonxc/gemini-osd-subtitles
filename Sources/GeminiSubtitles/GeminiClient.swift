@@ -118,25 +118,36 @@ final class GeminiClient {
     /// exhaustion). Firing `onError` per transient send failure would
     /// spam the user with error notifications the reconnect logic was
     /// designed to suppress.
+    ///
+    /// Runs on the main queue: `sendAudio` is invoked from the audio
+    /// pipeline's background queue, but `status`, `setupComplete`, `task`,
+    /// and `audioChunksSent` are all mutated on main (via `handleIncoming`,
+    /// `openConnection`, `stop`). Reading them off-main is a data race —
+    /// `stop()` could nil `task` mid-send. Hopping to main confines every
+    /// access to one thread. The `task.send` completion is itself async, so
+    /// the main-thread portion is just the guard + the send call.
     func sendAudio(base64PCM: String) {
-        guard isReady else {
-            if audioChunksSent == 0 {
-                DebugLog.write("GeminiClient.sendAudio DROPPED (not ready, status=\(status), setupComplete=\(setupComplete))")
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard self.isReady else {
+                if self.audioChunksSent == 0 {
+                    DebugLog.write("GeminiClient.sendAudio DROPPED (not ready, status=\(self.status), setupComplete=\(self.setupComplete))")
+                }
+                return
             }
-            return
-        }
-        guard let task, task.closeCode == .invalid else { return }
-        let message = GeminiProtocol.realtimeAudioMessage(base64PCM: base64PCM)
-        guard let payload = try? GeminiProtocol.encodeJSON(message) else { return }
-        audioChunksSent &+= 1
-        if audioChunksSent % 20 == 1 {
-            DebugLog.write("GeminiClient.sendAudio #\(audioChunksSent) (\(base64PCM.count) b64 chars)")
-        }
-        task.send(.string(payload)) { error in
-            if let error {
-                // Transient — the receive loop will detect the close and
-                // trigger the silent-reconnect path. See method doc above.
-                DebugLog.write("GeminiClient.sendAudio transient failure (will be picked up by receive loop): \(error.localizedDescription)")
+            guard let task = self.task, task.closeCode == .invalid else { return }
+            let message = GeminiProtocol.realtimeAudioMessage(base64PCM: base64PCM)
+            guard let payload = try? GeminiProtocol.encodeJSON(message) else { return }
+            self.audioChunksSent &+= 1
+            if self.audioChunksSent % 20 == 1 {
+                DebugLog.write("GeminiClient.sendAudio #\(self.audioChunksSent) (\(base64PCM.count) b64 chars)")
+            }
+            task.send(.string(payload)) { error in
+                if let error {
+                    // Transient — the receive loop will detect the close and
+                    // trigger the silent-reconnect path. See method doc above.
+                    DebugLog.write("GeminiClient.sendAudio transient failure (will be picked up by receive loop): \(error.localizedDescription)")
+                }
             }
         }
     }
