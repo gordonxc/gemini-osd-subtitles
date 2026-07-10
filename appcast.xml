@@ -13,7 +13,19 @@
         <link>https://github.com/gordonxc/gemini-osd-subtitles</link>
         <description>Release feed for Gemini Subtitles</description>
         <language>en</language>
-                                                        <item>
+                                                                <item>
+            <title>Version 0.9.9</title>
+            <pubDate>Fri, 10 Jul 2026 21:26:50 +0100</pubDate>
+            <sparkle:version>0.9.9</sparkle:version>
+            <sparkle:edSignature>Ce+2y4EWsRacmPhEegwFhDU54lxSEySvTNmlv1ZrpPIg9Gmr5t+zXa/dlHm9RZWoboB5Hbb8oy2HKfF/++tdBQ==</sparkle:edSignature>
+            <description><![CDATA[Enable Sparkle automatic updates — the app will now check for, download, and install updates automatically on launch and periodically.]]></description>
+            <enclosure
+                url="https://github.com/gordonxc/gemini-osd-subtitles/releases/download/v0.9.9/GeminiSubtitles-v0.9.9.zip"
+                sparkle:edSignature="Ce+2y4EWsRacmPhEegwFhDU54lxSEySvTNmlv1ZrpPIg9Gmr5t+zXa/dlHm9RZWoboB5Hbb8oy2HKfF/++tdBQ=="
+                length="1270303"
+                type="application/octet-stream" />
+        </item>
+        <item>
             <title>Version 0.9.8</title>
             <pubDate>Fri, 10 Jul 2026 21:23:58 +0100</pubDate>
             <sparkle:version>0.9.8</sparkle:version>
