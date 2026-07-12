@@ -36,6 +36,10 @@ let package = Package(
                     "-Xlinker", "@loader_path/../Frameworks",
                 ])
             ]
-        )
+        ),
+        .testTarget(
+            name: "GeminiSubtitlesTests",
+            path: "Tests/GeminiSubtitlesTests"
+        ),
     ]
 )
